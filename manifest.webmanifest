@@ -1,7 +1,7 @@
 {
-  "name": "BGA Land Mapper v0.2.0",
+  "name": "BGA Land Mapper v0.3.0",
   "short_name": "Land Mapper",
-  "description": "จับคู่ Land จาก X-ray กับ CAD XML พร้อม Manual Teach, Anchor และ Pattern Preview",
+  "description": "จับคู่ Land จาก X-ray กับ CAD XML พร้อม Measurement Histogram, Raw-data Part Filter และ Manual Teach",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

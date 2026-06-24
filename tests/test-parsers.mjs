@@ -26,7 +26,6 @@ console.log(JSON.stringify({
     package: schema.packageCol,
     land: schema.landCol,
     measurement: schema.measurementCol,
-    result: schema.resultCol,
   },
   mapping: mapping.stats,
 }, null, 2));

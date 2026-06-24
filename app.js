@@ -23,7 +23,7 @@ const els = {
   xmlFileName: $('xmlFileName'), xlsxFileName: $('xlsxFileName'), importMessage: $('importMessage'),
   progressWrap: $('progressWrap'), projectStatus: $('projectStatus'),
   componentColumn: $('componentColumn'), packageColumn: $('packageColumn'), landColumn: $('landColumn'),
-  measurementColumn: $('measurementColumn'), resultColumn: $('resultColumn'), remapButton: $('remapButton'),
+  measurementColumn: $('measurementColumn'), remapButton: $('remapButton'),
   mappedStat: $('mappedStat'), unmappedStat: $('unmappedStat'), xmlLandStat: $('xmlLandStat'), componentStat: $('componentStat'),
   mappingFormula: $('mappingFormula'), componentSelect: $('componentSelect'), heatmapToggle: $('heatmapToggle'), labelToggle: $('labelToggle'),
   fitButton: $('fitButton'), zoomInButton: $('zoomInButton'), zoomOutButton: $('zoomOutButton'),
@@ -32,7 +32,9 @@ const els = {
   canvas: $('cadCanvas'), viewerTitle: $('viewerTitle'), viewerSubtitle: $('viewerSubtitle'), tooltip: $('tooltip'), manualBanner: $('manualBanner'),
   tableFilter: $('tableFilter'), mappingTableBody: $('mappingTableBody'), tableSummary: $('tableSummary'), prevPage: $('prevPage'), nextPage: $('nextPage'), pageLabel: $('pageLabel'),
   selectedTitle: $('selectedTitle'), selectedSubTitle: $('selectedSubTitle'), dLocal: $('dLocal'), dGlobal: $('dGlobal'), dCad: $('dCad'), dComponent: $('dComponent'),
-  dX: $('dX'), dY: $('dY'), dMeasurement: $('dMeasurement'), dResult: $('dResult'), dConfidence: $('dConfidence'), dRow: $('dRow'), dMethod: $('dMethod'), dAnchor: $('dAnchor'),
+  dX: $('dX'), dY: $('dY'), dMeasurement: $('dMeasurement'), dConfidence: $('dConfidence'), dRow: $('dRow'), dMethod: $('dMethod'), dAnchor: $('dAnchor'),
+  measurementHistogram: $('measurementHistogram'), histogramBins: $('histogramBins'), histogramMessage: $('histogramMessage'),
+  histCount: $('histCount'), histMin: $('histMin'), histAverage: $('histAverage'), histMedian: $('histMedian'), histMax: $('histMax'),
   anchorButton: $('anchorButton'), unmapButton: $('unmapButton'), nudgePrevButton: $('nudgePrevButton'), nudgeNextButton: $('nudgeNextButton'),
   aliasInput: $('aliasInput'), saveAliasButton: $('saveAliasButton'), duplicateWarning: $('duplicateWarning'), rawData: $('rawData'), copyRawButton: $('copyRawButton'),
   teachOverlay: $('teachOverlay'), closeTeachButton: $('closeTeachButton'), teachComponentLabel: $('teachComponentLabel'),
@@ -54,6 +56,7 @@ const state = {
 };
 
 const ctx = els.canvas.getContext('2d', { alpha: false });
+const histogramCtx = els.measurementHistogram.getContext('2d');
 const formatInt = new Intl.NumberFormat('th-TH');
 const formatFloat = new Intl.NumberFormat('th-TH', { maximumFractionDigits: 4 });
 
@@ -148,7 +151,7 @@ function refreshAfterEdit() {
     els.manualBanner.classList.add('hidden');
     els.manualBanner.classList.remove('preview-active');
   }
-  recomputeStats(); updateStats(); updateDetails(); renderTable(); renderTeachPanel(); draw(); refreshHistoryButtons();
+  recomputeStats(); updateStats(); updateDetails(); renderTable(); renderTeachPanel(); draw(); renderHistogram(); refreshHistoryButtons();
 }
 
 function columnOptionLabel(descriptor) {
@@ -165,7 +168,7 @@ function fillColumnSelect(select, descriptors, selected, optional = false) {
 }
 function readSchemaControls() {
   const optional = (select) => select.value === '' ? null : Number(select.value);
-  return { ...state.schema, componentCol: Number(els.componentColumn.value), packageCol: Number(els.packageColumn.value), landCol: Number(els.landColumn.value), measurementCol: optional(els.measurementColumn), resultCol: optional(els.resultColumn) };
+  return { ...state.schema, componentCol: Number(els.componentColumn.value), packageCol: Number(els.packageColumn.value), landCol: Number(els.landColumn.value), measurementCol: optional(els.measurementColumn) };
 }
 function populateSchemaControls() {
   if (!state.schema) return;
@@ -174,26 +177,46 @@ function populateSchemaControls() {
   fillColumnSelect(els.packageColumn, d, state.schema.packageCol);
   fillColumnSelect(els.landColumn, d, state.schema.landCol);
   fillColumnSelect(els.measurementColumn, d, state.schema.measurementCol, true);
-  fillColumnSelect(els.resultColumn, d, state.schema.resultCol, true);
 }
 function populateComponents(preferredId = null) {
-  els.componentSelect.innerHTML = ''; if (!state.xmlData) return;
-  const components = [...state.xmlData.components].filter((component) => component.lands.length).sort((a, b) => b.lands.length - a.lands.length || a.name.localeCompare(b.name));
-  for (const component of components) {
-    const option = document.createElement('option'); option.value = component.id;
-    option.textContent = `${component.name || `ID ${component.id}`} · ${formatInt.format(component.lands.length)} lands · ${component.packageName || 'ไม่ทราบ package'}`;
+  els.componentSelect.innerHTML = '';
+  const summaries = state.mappingData?.componentSummaries || [];
+  if (!summaries.length) { state.selectedComponentId = null; return; }
+
+  const seen = new Set();
+  const matched = [];
+  for (const summary of summaries) {
+    if (summary.componentId == null || seen.has(String(summary.componentId))) continue;
+    seen.add(String(summary.componentId));
+    matched.push(summary);
+    const option = document.createElement('option');
+    option.value = String(summary.componentId);
+    option.textContent = `${summary.componentName || `ID ${summary.componentId}`} · Raw ${formatInt.format(summary.xrayCount)} / CAD ${formatInt.format(summary.xmlCount)} lands · ${summary.packageName || summary.cadPackageName || 'ไม่ทราบ package'}`;
     els.componentSelect.append(option);
   }
-  const mappedFirst = state.mappingData?.componentSummaries.find((summary) => summary.countMatch)?.componentId;
-  const chosen = preferredId || mappedFirst || components[0]?.id || null;
-  if (chosen != null) { state.selectedComponentId = String(chosen); els.componentSelect.value = String(chosen); }
+  for (const summary of summaries.filter((item) => item.componentId == null)) {
+    const option = document.createElement('option');
+    option.disabled = true;
+    option.textContent = `${summary.componentName || 'ไม่ทราบชื่อ'} · ไม่พบ Part นี้ใน CAD · Raw ${formatInt.format(summary.xrayCount)} lands`;
+    els.componentSelect.append(option);
+  }
+
+  const allowedIds = new Set(matched.map((summary) => String(summary.componentId)));
+  const countMatchFirst = matched.find((summary) => summary.countMatch)?.componentId;
+  const chosenCandidate = preferredId ?? countMatchFirst ?? matched[0]?.componentId ?? null;
+  const chosen = chosenCandidate != null && allowedIds.has(String(chosenCandidate)) ? String(chosenCandidate) : (matched[0] ? String(matched[0].componentId) : null);
+  state.selectedComponentId = chosen;
+  if (chosen != null) els.componentSelect.value = chosen;
 }
 function updateStats() {
   const stats = state.mappingData?.stats;
   els.mappedStat.textContent = formatInt.format(stats?.mapped || 0);
   els.unmappedStat.textContent = formatInt.format(stats?.unmapped || 0);
-  els.xmlLandStat.textContent = formatInt.format(state.xmlData?.totalLands || 0);
-  els.componentStat.textContent = formatInt.format(state.xmlData?.components.length || 0);
+  const summaries = state.mappingData?.componentSummaries || [];
+  const shownComponentIds = [...new Set(summaries.filter((item) => item.componentId != null).map((item) => String(item.componentId)))];
+  const shownCadLands = shownComponentIds.reduce((sum, id) => sum + (state.xmlData?.componentById.get(id)?.lands.length || 0), 0);
+  els.xmlLandStat.textContent = formatInt.format(shownCadLands);
+  els.componentStat.textContent = formatInt.format(summaries.length);
   const summary = state.mappingData?.componentSummaries.find((item) => String(item.componentId) === String(state.selectedComponentId)) || state.mappingData?.componentSummaries[0];
   const anchors = currentMappings().filter((mapping) => mapping.anchorLocked).length;
   if (summary?.countMatch) {
@@ -217,7 +240,7 @@ function runMapping() {
   state.undoStack = []; state.redoStack = []; state.preview = null;
   const firstMapped = state.mappingData.mappings.find((mapping) => mapping.mapped);
   populateComponents(firstMapped?.componentId || state.selectedComponentId); state.page = 1;
-  updateStats(); renderTable(); renderTeachPanel(); fitView(); draw();
+  updateStats(); renderTable(); renderTeachPanel(); fitView(); draw(); renderHistogram();
   toast(`จับคู่สำเร็จ ${formatInt.format(state.mappingData.stats.mapped)} จาก ${formatInt.format(state.mappingData.stats.total)} รายการ`);
 }
 async function processFile(file) {
@@ -233,24 +256,25 @@ async function processFile(file) {
       state.schema = autoDetectSchema(state.xlsxData.activeSheet.rows, state.xmlData); populateSchemaControls();
       state.mappingData = buildMappings(state.xmlData, state.xlsxData, state.schema); normalizeMappings(); state.undoStack = []; state.redoStack = []; state.preview = null;
       const firstMapped = state.mappingData.mappings.find((mapping) => mapping.mapped); populateComponents(firstMapped?.componentId); renderTable();
-      const summary = state.mappingData.componentSummaries[0];
-      els.importMessage.textContent = summary?.countMatch ? `ตรวจพบ ${summary.componentName}: X-ray และ XML ตรงกัน ${formatInt.format(summary.xmlCount)} Land · พร้อมใช้ Manual Teach` : 'เปิดไฟล์แล้ว แต่จำนวน Land บาง Component ไม่ตรงกัน กรุณาตรวจคอลัมน์หรือใช้ Manual Teach';
+      const summaries = state.mappingData.componentSummaries;
+      const matchedParts = summaries.filter((summary) => summary.matched).length;
+      const exactParts = summaries.filter((summary) => summary.countMatch).length;
+      const missingParts = summaries.length - matchedParts;
+      els.importMessage.textContent = `พบข้อมูลดิบ ${formatInt.format(summaries.length)} Part · จับคู่กับ CAD ได้ ${formatInt.format(matchedParts)} Part · จำนวน Land ตรงกัน ${formatInt.format(exactParts)} Part${missingParts ? ` · ไม่พบใน CAD ${formatInt.format(missingParts)} Part` : ''}`;
     } else els.importMessage.textContent = state.xmlData ? 'เปิด XML แล้ว กรุณาเลือก XLSX เพิ่ม' : 'เปิด XLSX แล้ว กรุณาเลือก XML เพิ่ม';
-    updateStats(); renderTeachPanel(); fitView(); draw();
+    updateStats(); renderTeachPanel(); fitView(); draw(); renderHistogram();
   } catch (error) { console.error(error); els.importMessage.textContent = `เกิดข้อผิดพลาด: ${error.message}`; toast(error.message, 5200); }
   finally { setLoading(false); els.projectFile.value = ''; }
 }
 function resetProject() {
   Object.assign(state, { xmlText: null, xlsxBuffer: null, xmlData: null, xlsxData: null, schema: null, mappingData: null, selectedComponentId: null, selected: null, hoveredLand: null, manualMode: false, preview: null, undoStack: [], redoStack: [], page: 1, fileNames: { xml: '', xlsx: '' }, view: { scale: 1, offsetX: 0, offsetY: 0 }, dragStart: null });
   els.xmlFileName.textContent = '—'; els.xlsxFileName.textContent = '—'; els.importMessage.textContent = 'ไฟล์จะถูกประมวลผลในเครื่อง ไม่อัปโหลดไปยังเซิร์ฟเวอร์';
-  for (const select of [els.componentColumn, els.packageColumn, els.landColumn, els.measurementColumn, els.resultColumn, els.componentSelect]) select.innerHTML = '';
-  els.mappingTableBody.innerHTML = ''; els.teachOverlay.classList.add('hidden'); clearDetails(); renderTeachPanel(); updateStats(); draw();
+  for (const select of [els.componentColumn, els.packageColumn, els.landColumn, els.measurementColumn, els.componentSelect]) select.innerHTML = '';
+  els.mappingTableBody.innerHTML = ''; els.teachOverlay.classList.add('hidden'); clearDetails(); renderTeachPanel(); updateStats(); draw(); renderHistogram();
 }
 function filteredMappings() {
   const mappings = currentMappings();
   switch (state.filter) {
-    case 'code0': return mappings.filter((m) => Number(m.resultCode) === 0);
-    case 'other': return mappings.filter((m) => m.resultCode != null && Number(m.resultCode) !== 0);
     case 'duplicate': return mappings.filter((m) => m.duplicateCadNameCount > 1);
     case 'manual': return mappings.filter((m) => m.manual || m.anchorLocked);
     case 'unmapped': return mappings.filter((m) => !m.mapped);
@@ -269,7 +293,7 @@ function renderTable() {
   const previewMappings = new Set(state.preview?.proposals.map((p) => p.mapping) || []); els.mappingTableBody.innerHTML = ''; const fragment = document.createDocumentFragment();
   for (const mapping of rows) {
     const tr = document.createElement('tr'); if (state.selected === mapping) tr.classList.add('active'); if (mapping.anchorLocked) tr.classList.add('anchor-row'); if (previewMappings.has(mapping)) tr.classList.add('preview-row');
-    const values = [mapping.localIndex, mapping.globalId, mapping.alias || mapping.cadName || 'Unmapped', Number.isFinite(mapping.centerX) ? formatFloat.format(mapping.centerX) : '—', Number.isFinite(mapping.centerY) ? formatFloat.format(mapping.centerY) : '—', mapping.measurement ?? '—', mapping.resultCode ?? '—', `${mapping.confidence ?? 0}%`];
+    const values = [mapping.localIndex, mapping.globalId, mapping.alias || mapping.cadName || 'Unmapped', Number.isFinite(mapping.centerX) ? formatFloat.format(mapping.centerX) : '—', Number.isFinite(mapping.centerY) ? formatFloat.format(mapping.centerY) : '—', mapping.measurement ?? '—', `${mapping.confidence ?? 0}%`];
     for (const value of values) { const td = document.createElement('td'); td.textContent = value; tr.append(td); }
     const status = mappingStatus(mapping); const statusTd = document.createElement('td'); const chip = document.createElement('span'); chip.className = `status-chip ${status.cls}`; chip.textContent = status.text; statusTd.append(chip); tr.append(statusTd);
     tr.addEventListener('click', () => selectMapping(mapping, true)); fragment.append(tr);
@@ -279,11 +303,11 @@ function renderTable() {
 function selectMapping(mapping, center = false) {
   state.selected = mapping; state.manualMode = false; els.manualBanner.classList.add('hidden'); els.manualBanner.classList.remove('preview-active'); els.manualButton.textContent = 'เลือก CAD ใหม่';
   if (mapping.componentId != null && String(mapping.componentId) !== String(state.selectedComponentId)) { state.selectedComponentId = String(mapping.componentId); els.componentSelect.value = String(mapping.componentId); fitView(); }
-  updateDetails(); renderTable(); if (center && Number.isFinite(mapping.centerX) && Number.isFinite(mapping.centerY)) centerOn(mapping.centerX, mapping.centerY); draw();
+  updateDetails(); renderTable(); if (center && Number.isFinite(mapping.centerX) && Number.isFinite(mapping.centerY)) centerOn(mapping.centerX, mapping.centerY); draw(); renderHistogram();
 }
 function clearDetails() {
   state.selected = null; els.selectedTitle.textContent = 'ยังไม่ได้เลือก'; els.selectedSubTitle.textContent = 'ค้นหาหรือคลิกตำแหน่งบนกราฟิก';
-  for (const el of [els.dLocal, els.dGlobal, els.dCad, els.dComponent, els.dX, els.dY, els.dMeasurement, els.dResult, els.dConfidence, els.dRow, els.dMethod, els.dAnchor]) el.textContent = '—';
+  for (const el of [els.dLocal, els.dGlobal, els.dCad, els.dComponent, els.dX, els.dY, els.dMeasurement, els.dConfidence, els.dRow, els.dMethod, els.dAnchor]) el.textContent = '—';
   els.rawData.textContent = '—'; els.aliasInput.value = ''; els.aliasInput.disabled = true; els.saveAliasButton.disabled = true; els.copyRawButton.disabled = true; els.duplicateWarning.classList.add('hidden');
   for (const button of [els.manualButton, els.anchorButton, els.unmapButton, els.nudgePrevButton, els.nudgeNextButton]) button.disabled = true;
 }
@@ -292,7 +316,7 @@ function updateDetails() {
   els.selectedTitle.textContent = mapping.alias || mapping.cadName || `Land ${mapping.localIndex}`; els.selectedSubTitle.textContent = `${mapping.componentName || 'Unknown component'} · ${mapping.packageName || 'Unknown package'}`;
   els.dLocal.textContent = mapping.localIndex ?? '—'; els.dGlobal.textContent = mapping.globalId ?? '—'; els.dCad.textContent = mapping.cadName || '—'; els.dComponent.textContent = mapping.componentName || '—';
   els.dX.textContent = Number.isFinite(mapping.centerX) ? `${formatFloat.format(mapping.centerX)} mm` : '—'; els.dY.textContent = Number.isFinite(mapping.centerY) ? `${formatFloat.format(mapping.centerY)} mm` : '—';
-  els.dMeasurement.textContent = mapping.measurement ?? '—'; els.dResult.textContent = mapping.resultCode ?? '—'; els.dConfidence.textContent = `${mapping.confidence ?? 0}%${mapping.manual ? ' · manual' : ''}`; els.dRow.textContent = mapping.sourceRow ?? '—';
+  els.dMeasurement.textContent = mapping.measurement ?? '—'; els.dConfidence.textContent = `${mapping.confidence ?? 0}%${mapping.manual ? ' · manual' : ''}`; els.dRow.textContent = mapping.sourceRow ?? '—';
   els.dMethod.textContent = mapping.mappingMethod || (mapping.manual ? 'manual' : 'auto'); els.dAnchor.textContent = mapping.anchorLocked ? 'ล็อกแล้ว' : 'ไม่ล็อก';
   els.aliasInput.disabled = false; els.saveAliasButton.disabled = false; els.copyRawButton.disabled = !mapping.raw; els.aliasInput.value = mapping.alias || '';
   els.rawData.textContent = mapping.raw ? mapping.raw.map((value, index) => `${columnName(index)}: ${value ?? ''}`).join('\n') : JSON.stringify(mapping, null, 2);
@@ -314,9 +338,90 @@ function centerOn(x, y) { state.view.offsetX = els.canvas.clientWidth / 2 - x * 
 function zoomAt(factor, screenX = els.canvas.clientWidth / 2, screenY = els.canvas.clientHeight / 2) {
   const world = screenToWorld(screenX, screenY); const newScale = Math.min(450, Math.max(0.25, state.view.scale * factor)); state.view.scale = newScale; state.view.offsetX = screenX - world.x * newScale; state.view.offsetY = screenY + world.y * newScale; draw();
 }
-function resultColor(mapping, minMeasurement, maxMeasurement) {
-  if (els.heatmapToggle.checked && mapping && Number.isFinite(Number(mapping.measurement)) && maxMeasurement > minMeasurement) { const ratio = (Number(mapping.measurement) - minMeasurement) / (maxMeasurement - minMeasurement); return `hsl(${210 - ratio * 190} 78% 58%)`; }
-  if (!mapping) return '#506078'; if (Number(mapping.resultCode) === 0) return '#ff6b75'; if (mapping.resultCode != null) return '#5cd8a6'; return '#62a9e8';
+function renderHistogram() {
+  const canvas = els.measurementHistogram;
+  const hctx = histogramCtx;
+  if (!canvas || !hctx) return;
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const width = canvas.clientWidth || 260;
+  const height = canvas.clientHeight || 170;
+  const targetW = Math.round(width * dpr);
+  const targetH = Math.round(height * dpr);
+  if (canvas.width !== targetW || canvas.height !== targetH) { canvas.width = targetW; canvas.height = targetH; }
+  hctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  hctx.clearRect(0, 0, width, height);
+  hctx.fillStyle = '#0b1320';
+  hctx.fillRect(0, 0, width, height);
+
+  const values = currentMappings().map((mapping) => Number(mapping.measurement)).filter(Number.isFinite).sort((a, b) => a - b);
+  const component = currentComponent();
+  els.histCount.textContent = formatInt.format(values.length);
+  if (!values.length) {
+    for (const el of [els.histMin, els.histAverage, els.histMedian, els.histMax]) el.textContent = '—';
+    els.histogramMessage.textContent = component ? `${component.name}: ไม่พบ Measurement ที่เป็นตัวเลขในข้อมูลดิบ` : 'เลือก Part ที่พบในข้อมูลดิบเพื่อแสดง Histogram';
+    hctx.fillStyle = '#91a0b7'; hctx.font = '11px system-ui'; hctx.textAlign = 'center'; hctx.textBaseline = 'middle'; hctx.fillText('No numeric measurement data', width / 2, height / 2);
+    return;
+  }
+
+  const min = values[0];
+  const max = values[values.length - 1];
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const middle = Math.floor(values.length / 2);
+  const median = values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+  const display = (value) => formatFloat.format(value);
+  els.histMin.textContent = display(min); els.histAverage.textContent = display(average); els.histMedian.textContent = display(median); els.histMax.textContent = display(max);
+
+  const requestedBins = Math.max(5, Math.min(80, Number(els.histogramBins.value) || 20));
+  const binCount = max === min ? 1 : requestedBins;
+  const span = max - min || 1;
+  const counts = Array(binCount).fill(0);
+  for (const value of values) {
+    const index = max === min ? 0 : Math.min(binCount - 1, Math.floor(((value - min) / span) * binCount));
+    counts[index] += 1;
+  }
+  const peak = Math.max(...counts, 1);
+  const margin = { left: 36, right: 10, top: 12, bottom: 25 };
+  const chartW = Math.max(1, width - margin.left - margin.right);
+  const chartH = Math.max(1, height - margin.top - margin.bottom);
+
+  hctx.strokeStyle = 'rgba(145,160,183,.16)'; hctx.lineWidth = 1;
+  for (let step = 0; step <= 2; step += 1) {
+    const y = margin.top + chartH * (step / 2);
+    hctx.beginPath(); hctx.moveTo(margin.left, y); hctx.lineTo(width - margin.right, y); hctx.stroke();
+  }
+  const slot = chartW / binCount;
+  const gap = Math.min(2, slot * 0.18);
+  counts.forEach((count, index) => {
+    const barH = (count / peak) * chartH;
+    const ratio = binCount === 1 ? 0.5 : index / (binCount - 1);
+    hctx.fillStyle = `hsl(${210 - ratio * 190} 78% 58%)`;
+    hctx.fillRect(margin.left + index * slot + gap / 2, margin.top + chartH - barH, Math.max(1, slot - gap), barH);
+  });
+
+  hctx.fillStyle = '#91a0b7'; hctx.font = '9px system-ui'; hctx.textBaseline = 'top';
+  hctx.textAlign = 'left'; hctx.fillText(display(min), margin.left, height - margin.bottom + 6);
+  hctx.textAlign = 'right'; hctx.fillText(display(max), width - margin.right, height - margin.bottom + 6);
+  hctx.textBaseline = 'middle'; hctx.fillText(formatInt.format(peak), margin.left - 5, margin.top + 2);
+  hctx.fillText('0', margin.left - 5, margin.top + chartH);
+
+  const selectedMeasurement = Number(state.selected?.measurement);
+  if (Number.isFinite(selectedMeasurement) && String(state.selected?.componentId) === String(state.selectedComponentId)) {
+    const ratio = max === min ? 0.5 : Math.max(0, Math.min(1, (selectedMeasurement - min) / span));
+    const x = margin.left + ratio * chartW;
+    hctx.strokeStyle = '#ffffff'; hctx.lineWidth = 1.5; hctx.beginPath(); hctx.moveTo(x, margin.top); hctx.lineTo(x, margin.top + chartH); hctx.stroke();
+    hctx.fillStyle = '#ffffff'; hctx.textAlign = x > width * 0.72 ? 'right' : 'left'; hctx.textBaseline = 'top'; hctx.fillText(display(selectedMeasurement), x + (x > width * 0.72 ? -4 : 4), margin.top + 2);
+  }
+
+  const binWidth = binCount === 1 ? 0 : span / binCount;
+  els.histogramMessage.textContent = `${component?.name || 'Part'} · ${formatInt.format(values.length)} ค่า · ${binCount} bins${binWidth ? ` · bin width ${display(binWidth)}` : ''}`;
+}
+function measurementColor(mapping, minMeasurement, maxMeasurement) {
+  if (!mapping) return '#506078';
+  if (els.heatmapToggle.checked && Number.isFinite(Number(mapping.measurement))) {
+    const ratio = maxMeasurement > minMeasurement ? (Number(mapping.measurement) - minMeasurement) / (maxMeasurement - minMeasurement) : 0.5;
+    return `hsl(${210 - Math.max(0, Math.min(1, ratio)) * 190} 78% 58%)`;
+  }
+  return '#62a9e8';
 }
 function drawGrid(width, height) {
   const spacingWorld = state.view.scale < 5 ? 20 : state.view.scale < 15 ? 10 : state.view.scale < 45 ? 5 : 1; const spacing = spacingWorld * state.view.scale; if (spacing < 12) return;
@@ -337,7 +442,7 @@ function draw() {
   for (const land of component.lands) {
     const p = worldToScreen(land.centerX, land.centerY); if (p.x < -15 || p.x > width + 15 || p.y < -15 || p.y > height + 15) continue;
     const mapping = byGlobal.get(Number(land.globalId)); const previewStatus = previewByGlobal.get(Number(land.globalId)); const radius = Math.max(1.1, Math.min(8, (land.width || 0.5) * state.view.scale * 0.42));
-    ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.fillStyle = resultColor(mapping, minMeasurement, maxMeasurement); ctx.globalAlpha = mapping ? 0.9 : 0.48; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.fillStyle = measurementColor(mapping, minMeasurement, maxMeasurement); ctx.globalAlpha = mapping ? 0.9 : 0.48; ctx.fill(); ctx.globalAlpha = 1;
     if (previewStatus) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2.5, radius + 1.5), 0, Math.PI * 2); ctx.strokeStyle = ['conflict', 'anchor-conflict', 'out-of-range'].includes(previewStatus) ? '#ff6b75' : '#2ba7ff'; ctx.globalAlpha = 0.72; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1; }
     if (mapping?.anchorLocked) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(3.5, radius + 2.5), 0, Math.PI * 2); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.8; ctx.stroke(); }
     else if (mapping?.manual) { ctx.strokeStyle = '#9d7cff'; ctx.lineWidth = 1.3; ctx.stroke(); }
@@ -353,7 +458,7 @@ function findNearestLand(screenX, screenY) {
 function showTooltip(event, land) {
   if (!land) { els.tooltip.classList.add('hidden'); return; }
   const mapping = mappingByGlobalId().get(Number(land.globalId)); const preview = state.preview?.lookup?.get(Number(land.globalId));
-  els.tooltip.innerHTML = `<strong>${mapping?.alias || land.cadName}</strong><br>X-ray: ${mapping?.localIndex ?? '—'}<br>XML ID: ${land.globalId}<br>X: ${formatFloat.format(land.centerX)} · Y: ${formatFloat.format(land.centerY)}${mapping ? `<br>Code: ${mapping.resultCode ?? '—'}` : ''}${preview ? `<br>Preview: X-ray ${preview.localIndex} · ${preview.status}` : ''}`;
+  els.tooltip.innerHTML = `<strong>${mapping?.alias || land.cadName}</strong><br>X-ray: ${mapping?.localIndex ?? '—'}<br>XML ID: ${land.globalId}<br>X: ${formatFloat.format(land.centerX)} · Y: ${formatFloat.format(land.centerY)}${mapping ? `<br>Measurement: ${mapping.measurement ?? '—'}` : ''}${preview ? `<br>Preview: X-ray ${preview.localIndex} · ${preview.status}` : ''}`;
   const rect = els.canvas.getBoundingClientRect(); els.tooltip.style.left = `${Math.min(rect.width - 190, event.clientX - rect.left + 13)}px`; els.tooltip.style.top = `${Math.min(rect.height - 125, event.clientY - rect.top + 13)}px`; els.tooltip.classList.remove('hidden');
 }
 function directRemap(mapping, land, label = 'Manual remap') {
@@ -372,7 +477,7 @@ function selectLand(land) {
   if (!land) return; if (state.manualMode && state.selected) { directRemap(state.selected, land); return; }
   const existing = mappingByGlobalId().get(Number(land.globalId));
   if (existing) selectMapping(existing, false);
-  else selectMapping({ sourceRow: null, componentName: currentComponent()?.name, packageName: currentComponent()?.packageName, localIndex: land.localIndex, componentId: land.componentId, globalId: land.globalId, cadName: land.cadName, left: land.left, top: land.top, centerX: land.centerX, centerY: land.centerY, width: land.width, length: land.length, measurement: null, resultCode: null, confidence: 0, mapped: true, manual: false, anchorLocked: false, mappingMethod: 'xml-only', duplicateCadNameCount: duplicateCountForLand(land), raw: null }, false);
+  else selectMapping({ sourceRow: null, componentName: currentComponent()?.name, packageName: currentComponent()?.packageName, localIndex: land.localIndex, componentId: land.componentId, globalId: land.globalId, cadName: land.cadName, left: land.left, top: land.top, centerX: land.centerX, centerY: land.centerY, width: land.width, length: land.length, measurement: null, confidence: 0, mapped: true, manual: false, anchorLocked: false, mappingMethod: 'xml-only', duplicateCadNameCount: duplicateCountForLand(land), raw: null }, false);
 }
 function toggleAnchor() {
   const mapping = state.selected; if (!mapping?.mapped) return; const before = snapshotMapping(mapping);
@@ -464,14 +569,14 @@ function unmapRange() {
   if (!targets.length) return toast('ไม่มีรายการในช่วงที่สามารถ Unmap ได้'); if (!window.confirm(`Unmap ${targets.length} จุดในช่วงนี้ โดยรักษา Anchor ไว้ใช่หรือไม่?`)) return; applyTransaction('Unmap range', targets.map((mapping) => ({ mapping, before: snapshotMapping(mapping), after: stateForUnmapped(mapping) }))); toast(`Unmap แล้ว ${formatInt.format(targets.length)} จุด`);
 }
 function exportCsv() {
-  const mappings = state.mappingData?.mappings || []; const headers = ['xray_local_land','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','result_code','confidence','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row']; const lines = [headers.join(',')];
-  for (const m of mappings) lines.push([m.localIndex, m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.resultCode, m.confidence, m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
-  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.2.0.csv`);
+  const mappings = state.mappingData?.mappings || []; const headers = ['xray_local_land','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row']; const lines = [headers.join(',')];
+  for (const m of mappings) lines.push([m.localIndex, m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.confidence, m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
+  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.3.0.csv`);
 }
 function exportJson() {
-  const payload = { app: 'BGA Land Mapper', version: '0.2.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol, resultCol: state.schema.resultCol } : null, componentSummaries: state.mappingData?.componentSummaries,
+  const payload = { app: 'BGA Land Mapper', version: '0.3.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries,
     overrides: (state.mappingData?.mappings || []).filter((m) => m.manual || m.alias || m.anchorLocked || !m.mapped).map((m) => ({ sourceRow: m.sourceRow, localIndex: m.localIndex, componentName: m.componentName, componentId: m.componentId, globalId: m.globalId, cadName: m.cadName, alias: m.alias || '', manual: Boolean(m.manual), mapped: Boolean(m.mapped), anchorLocked: Boolean(m.anchorLocked), confidence: m.confidence, mappingMethod: m.mappingMethod })) };
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.2.0.json');
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.3.0.json');
 }
 async function restoreBackup(file) {
   if (!file || !state.mappingData || !state.xmlData) return;
@@ -492,7 +597,7 @@ async function restoreBackup(file) {
   } catch (error) { console.error(error); toast(`นำเข้า Backup ไม่สำเร็จ: ${error.message}`, 5200); }
   finally { els.restoreFile.value = ''; }
 }
-function resizeCanvas() { draw(); }
+function resizeCanvas() { draw(); renderHistogram(); }
 
 els.projectFile.addEventListener('change', (event) => processFile(event.target.files[0]));
 els.dropZone.addEventListener('dragover', (event) => { event.preventDefault(); els.dropZone.classList.add('drag'); });
@@ -501,7 +606,8 @@ els.dropZone.addEventListener('drop', (event) => { event.preventDefault(); els.d
 els.restoreButton.addEventListener('click', () => els.restoreFile.click());
 els.restoreFile.addEventListener('change', (event) => restoreBackup(event.target.files[0]));
 els.resetButton.addEventListener('click', resetProject); els.remapButton.addEventListener('click', runMapping);
-els.componentSelect.addEventListener('change', () => { state.selectedComponentId = els.componentSelect.value; state.selected = null; state.preview = null; state.page = 1; clearDetails(); updateStats(); renderTable(); renderTeachPanel(); fitView(); });
+els.componentSelect.addEventListener('change', () => { state.selectedComponentId = els.componentSelect.value; state.selected = null; state.preview = null; state.page = 1; clearDetails(); updateStats(); renderTable(); renderTeachPanel(); fitView(); renderHistogram(); });
+els.histogramBins.addEventListener('change', renderHistogram);
 els.heatmapToggle.addEventListener('change', draw); els.labelToggle.addEventListener('change', draw); els.fitButton.addEventListener('click', fitView); els.zoomInButton.addEventListener('click', () => zoomAt(1.3)); els.zoomOutButton.addEventListener('click', () => zoomAt(1 / 1.3));
 els.searchButton.addEventListener('click', search); els.searchInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') search(); });
 els.tableFilter.addEventListener('change', () => { state.filter = els.tableFilter.value; state.page = 1; renderTable(); }); els.prevPage.addEventListener('click', () => { state.page -= 1; renderTable(); }); els.nextPage.addEventListener('click', () => { state.page += 1; renderTable(); });
@@ -523,5 +629,7 @@ window.addEventListener('keydown', (event) => { const tag = document.activeEleme
 window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); state.installPrompt = event; els.installButton.classList.remove('hidden'); });
 els.installButton.addEventListener('click', async () => { if (!state.installPrompt) return; state.installPrompt.prompt(); await state.installPrompt.userChoice; state.installPrompt = null; els.installButton.classList.add('hidden'); });
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.warn));
-new ResizeObserver(resizeCanvas).observe(els.canvas);
+const resizeObserver = new ResizeObserver(resizeCanvas);
+resizeObserver.observe(els.canvas);
+resizeObserver.observe(els.measurementHistogram);
 resetProject();

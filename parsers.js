@@ -274,8 +274,9 @@ function majorityValue(values) {
 
 export function autoDetectSchema(rows, xmlData) {
   const maxCols = Math.max(0, ...rows.map((row) => row.length));
-  const componentNames = new Set(xmlData.components.map((component) => component.name).filter(Boolean));
-  const packageNames = new Set(xmlData.components.map((component) => component.packageName).filter(Boolean));
+  const normalizeMatch = (value) => String(value ?? '').trim().toLocaleUpperCase();
+  const componentNames = new Set(xmlData.components.map((component) => normalizeMatch(component.name)).filter(Boolean));
+  const packageNames = new Set(xmlData.components.map((component) => normalizeMatch(component.packageName)).filter(Boolean));
   const descriptors = [];
 
   for (let col = 0; col < maxCols; col += 1) {
@@ -284,8 +285,8 @@ export function autoDetectSchema(rows, xmlData) {
     const numeric = values.filter((value) => Number.isFinite(Number(value)));
     const integers = numeric.filter((value) => Number.isInteger(Number(value)) && Number(value) > 0);
     const unique = new Set(values.map(String));
-    const componentHits = values.filter((value) => componentNames.has(String(value))).length;
-    const packageHits = values.filter((value) => packageNames.has(String(value))).length;
+    const componentHits = values.filter((value) => componentNames.has(normalizeMatch(value))).length;
+    const packageHits = values.filter((value) => packageNames.has(normalizeMatch(value))).length;
     let sequentialHits = 0;
     for (let i = 0; i < Math.min(values.length, 1500); i += 1) {
       if (Number(values[i]) === i + 1) sequentialHits += 1;
@@ -326,17 +327,12 @@ export function autoDetectSchema(rows, xmlData) {
       .sort((a, b) => b.uniqueCount - a.uniqueCount)[0]?.col ?? null;
   }
 
-  const resultCol = descriptors
-    .filter((d) => d.col !== landCol && d.col !== measurementCol && d.col > (measurementCol ?? -1) && d.numericRatio > 0.9 && d.uniqueCount > 1 && d.uniqueCount <= 20)
-    .sort((a, b) => a.uniqueCount - b.uniqueCount || b.col - a.col)[0]?.col ?? null;
-
   return {
     componentCol,
     packageCol,
     featureCol,
     landCol,
     measurementCol,
-    resultCol,
     descriptors,
     alternates: { land: landCandidates.slice(1, 4).map((d) => d.col) },
   };
@@ -354,16 +350,36 @@ function confidenceFor({ exactComponent, exactPackage, countMatch, contiguous })
 export function buildMappings(xmlData, xlsxData, schema) {
   const rows = xlsxData.activeSheet.rows;
   const dataRows = rows.slice(1);
+  const normalize = (value) => String(value ?? '').trim().toLocaleUpperCase();
   const componentsByName = new Map();
   for (const component of xmlData.components) {
-    if (!componentsByName.has(component.name)) componentsByName.set(component.name, []);
-    componentsByName.get(component.name).push(component);
+    const key = normalize(component.name);
+    if (!componentsByName.has(key)) componentsByName.set(key, []);
+    componentsByName.get(key).push(component);
   }
 
-  const xrayCounts = new Map();
+  const resolveComponent = (componentName, packageName) => {
+    const candidates = componentsByName.get(normalize(componentName)) || [];
+    if (!candidates.length) return null;
+    const normalizedPackage = normalize(packageName);
+    if (normalizedPackage) {
+      const exactPackage = candidates.find((component) => normalize(component.packageName) === normalizedPackage);
+      if (exactPackage) return exactPackage;
+    }
+    return candidates.length === 1 ? candidates[0] : candidates[0];
+  };
+
+  // Group by the parts that really exist in the raw X-ray data. The viewer uses
+  // these groups instead of exposing every component found in the CAD XML.
+  const rawGroups = new Map();
   for (const row of dataRows) {
-    const key = String(row?.[schema.componentCol] ?? '');
-    xrayCounts.set(key, (xrayCounts.get(key) || 0) + 1);
+    if (!row || row.every((value) => value == null || value === '')) continue;
+    const componentName = String(row?.[schema.componentCol] ?? '').trim();
+    const packageName = String(row?.[schema.packageCol] ?? '').trim();
+    const key = `${normalize(componentName)}\u0000${normalize(packageName)}`;
+    const group = rawGroups.get(key) || { key, componentName, packageName, count: 0 };
+    group.count += 1;
+    rawGroups.set(key, group);
   }
 
   const cadNameCounts = new Map();
@@ -381,12 +397,11 @@ export function buildMappings(xmlData, xlsxData, schema) {
     const componentName = String(row[schema.componentCol] ?? '').trim();
     const packageName = String(row[schema.packageCol] ?? '').trim();
     const localIndex = Number(row[schema.landCol]);
-    const candidates = componentsByName.get(componentName) || [];
-    const packageMatches = candidates.filter((component) => !packageName || component.packageName === packageName);
-    const component = packageMatches[0] || candidates[0] || null;
+    const rawKey = `${normalize(componentName)}\u0000${normalize(packageName)}`;
+    const component = resolveComponent(componentName, packageName);
     const land = component && Number.isInteger(localIndex) && localIndex > 0 ? component.lands[localIndex - 1] : null;
-    const countMatch = component ? xrayCounts.get(componentName) === component.lands.length : false;
-    const exactPackage = Boolean(component && packageName && component.packageName === packageName);
+    const countMatch = component ? rawGroups.get(rawKey)?.count === component.lands.length : false;
+    const exactPackage = Boolean(component && packageName && normalize(component.packageName) === normalize(packageName));
     const confidence = confidenceFor({
       exactComponent: Boolean(component), exactPackage, countMatch,
       contiguous: Boolean(component?.contiguousGlobalIds),
@@ -394,6 +409,7 @@ export function buildMappings(xmlData, xlsxData, schema) {
 
     mappings.push({
       sourceRow: i + 2,
+      rawPartKey: rawKey,
       componentName,
       packageName,
       localIndex: Number.isFinite(localIndex) ? localIndex : null,
@@ -407,7 +423,6 @@ export function buildMappings(xmlData, xlsxData, schema) {
       width: land?.width ?? null,
       length: land?.length ?? null,
       measurement: schema.measurementCol == null ? null : row[schema.measurementCol],
-      resultCode: schema.resultCol == null ? null : row[schema.resultCol],
       confidence,
       mapped: Boolean(land),
       manual: false,
@@ -417,20 +432,23 @@ export function buildMappings(xmlData, xlsxData, schema) {
   }
 
   const componentSummaries = [];
-  for (const [componentName, count] of xrayCounts) {
-    const candidates = componentsByName.get(componentName) || [];
-    const component = candidates[0] || null;
+  for (const group of rawGroups.values()) {
+    const component = resolveComponent(group.componentName, group.packageName);
     componentSummaries.push({
-      componentName,
-      xrayCount: count,
+      rawPartKey: group.key,
+      componentName: group.componentName,
+      xrayCount: group.count,
       xmlCount: component?.lands.length ?? 0,
       componentId: component?.id ?? null,
-      packageName: component?.packageName ?? '',
+      packageName: group.packageName || component?.packageName || '',
+      cadPackageName: component?.packageName ?? '',
       contiguous: component?.contiguousGlobalIds ?? false,
       offset: component?.offset ?? null,
-      countMatch: Boolean(component && component.lands.length === count),
+      countMatch: Boolean(component && component.lands.length === group.count),
+      matched: Boolean(component),
     });
   }
+  componentSummaries.sort((a, b) => a.componentName.localeCompare(b.componentName, undefined, { numeric: true }) || a.packageName.localeCompare(b.packageName));
 
   return {
     mappings,
@@ -440,6 +458,8 @@ export function buildMappings(xmlData, xlsxData, schema) {
       mapped: mappings.filter((m) => m.mapped).length,
       unmapped: mappings.filter((m) => !m.mapped).length,
       duplicateCadNames: mappings.filter((m) => m.duplicateCadNameCount > 1).length,
+      rawParts: componentSummaries.length,
+      matchedRawParts: componentSummaries.filter((summary) => summary.matched).length,
     },
   };
 }

@@ -1,0 +1,15 @@
+import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
+
+const [html, app, parser] = await Promise.all([
+  fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
+  fs.readFile(new URL('../app.js', import.meta.url), 'utf8'),
+  fs.readFile(new URL('../parsers.js', import.meta.url), 'utf8'),
+]);
+const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map((match) => match[1]));
+const refs = new Set([...app.matchAll(/\$\('([^']+)'\)/g)].map((match) => match[1]));
+assert.deepEqual([...refs].filter((id) => !ids.has(id)), []);
+assert(html.includes('measurementHistogram'));
+assert(html.includes('Raw-data parts'));
+assert.equal(/Result code|result_code/i.test(html + app + parser), false);
+console.log('static DOM and removed-result checks passed');

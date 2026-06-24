@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
-  <title>BGA Land Mapper v0.2.0</title>
+  <title>BGA Land Mapper v0.3.0</title>
 </head>
 <body>
   <header class="topbar">
@@ -59,7 +59,6 @@
           <label>Package<select id="packageColumn"></select></label>
           <label>Land number<select id="landColumn"></select></label>
           <label>Measurement<select id="measurementColumn"></select></label>
-          <label>Result code<select id="resultColumn"></select></label>
         </div>
         <button id="remapButton" class="primary full" type="button" disabled>คำนวณ Mapping ใหม่</button>
       </section>
@@ -69,8 +68,8 @@
         <div class="stat-grid">
           <div class="stat"><span>Mapped</span><strong id="mappedStat">0</strong></div>
           <div class="stat"><span>Unmapped</span><strong id="unmappedStat">0</strong></div>
-          <div class="stat"><span>XML lands</span><strong id="xmlLandStat">0</strong></div>
-          <div class="stat"><span>Components</span><strong id="componentStat">0</strong></div>
+          <div class="stat"><span>CAD lands shown</span><strong id="xmlLandStat">0</strong></div>
+          <div class="stat"><span>Raw-data parts</span><strong id="componentStat">0</strong></div>
         </div>
         <div id="mappingFormula" class="formula-card">ยังไม่มีสูตร Mapping</div>
       </section>
@@ -80,7 +79,7 @@
         <label>Component
           <select id="componentSelect"></select>
         </label>
-        <label class="toggle-row"><input id="heatmapToggle" type="checkbox" /><span>Heatmap จาก Measurement</span></label>
+        <label class="toggle-row"><input id="heatmapToggle" type="checkbox" checked /><span>Heatmap จาก Measurement</span></label>
         <label class="toggle-row"><input id="labelToggle" type="checkbox" /><span>แสดงชื่อ CAD เมื่อซูมเข้า</span></label>
         <div class="button-grid">
           <button id="fitButton" type="button">Fit</button>
@@ -114,8 +113,8 @@
           <small id="viewerSubtitle">นำเข้าไฟล์เพื่อแสดงตำแหน่ง Land</small>
         </div>
         <div class="viewer-hud bottom-left legend">
-          <span><i class="dot code0"></i> Result code 0</span>
-          <span><i class="dot codeOther"></i> Result code อื่น</span>
+          <span class="measurement-gradient"></span>
+          <span>Measurement ต่ำ → สูง</span>
           <span><i class="dot selected"></i> จุดที่เลือก</span>
         </div>
         <div id="manualBanner" class="manual-banner hidden">โหมดแก้ Mapping: คลิก Land ที่ต้องการนำมาจับคู่กับรายการที่เลือก</div>
@@ -131,8 +130,6 @@
           <div class="table-controls">
             <select id="tableFilter">
               <option value="all">ทั้งหมด</option>
-              <option value="code0">Result code 0</option>
-              <option value="other">Result code อื่น</option>
               <option value="duplicate">ชื่อ CAD ซ้ำ</option>
               <option value="manual">แก้ด้วยตนเอง</option>
               <option value="unmapped">Unmapped</option>
@@ -144,7 +141,7 @@
         </div>
         <div class="table-scroll">
           <table>
-            <thead><tr><th>X-ray Land</th><th>XML ID</th><th>CAD Name</th><th>X</th><th>Y</th><th>Measurement</th><th>Code</th><th>Confidence</th><th>Status</th></tr></thead>
+            <thead><tr><th>X-ray Land</th><th>XML ID</th><th>CAD Name</th><th>X</th><th>Y</th><th>Measurement</th><th>Confidence</th><th>Status</th></tr></thead>
             <tbody id="mappingTableBody"></tbody>
           </table>
         </div>
@@ -165,11 +162,35 @@
         <div><span>Position X</span><strong id="dX">—</strong></div>
         <div><span>Position Y</span><strong id="dY">—</strong></div>
         <div><span>Measurement</span><strong id="dMeasurement">—</strong></div>
-        <div><span>Result code</span><strong id="dResult">—</strong></div>
         <div><span>Confidence</span><strong id="dConfidence">—</strong></div>
         <div><span>Source row</span><strong id="dRow">—</strong></div>
         <div><span>Mapping method</span><strong id="dMethod">—</strong></div>
         <div><span>Anchor</span><strong id="dAnchor">—</strong></div>
+      </section>
+      <section class="panel-section histogram-section">
+        <div class="section-heading histogram-heading">
+          <div>
+            <span class="eyebrow">MEASUREMENT</span>
+            <h2>Histogram</h2>
+          </div>
+          <label class="compact-control">Bins
+            <select id="histogramBins">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="30">30</option>
+              <option value="50">50</option>
+            </select>
+          </label>
+        </div>
+        <canvas id="measurementHistogram" height="170" aria-label="Measurement histogram"></canvas>
+        <div class="histogram-stats">
+          <div><span>Count</span><strong id="histCount">0</strong></div>
+          <div><span>Min</span><strong id="histMin">—</strong></div>
+          <div><span>Average</span><strong id="histAverage">—</strong></div>
+          <div><span>Median</span><strong id="histMedian">—</strong></div>
+          <div><span>Max</span><strong id="histMax">—</strong></div>
+        </div>
+        <p id="histogramMessage" class="helper-text">Histogram จะแสดง Measurement ของ Part ที่เลือกจากข้อมูลดิบเท่านั้น</p>
       </section>
       <section class="panel-section manual-actions-section">
         <span class="eyebrow">MANUAL ACTIONS</span>

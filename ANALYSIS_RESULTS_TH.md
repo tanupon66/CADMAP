@@ -27,7 +27,6 @@
 | Feature type | L | `Land` |
 | X-ray local Land | M/N | `1–17662` |
 | Measurement | T | `498`, `486`, `565` |
-| Result code | V | `67` หรือ `0` |
 
 คอลัมน์ M และ N มีหมายเลขเหมือนกันทุกแถว โปรแกรมเลือก M เป็นค่าเริ่มต้นแต่ผู้ใช้เปลี่ยนเป็น N ได้
 
@@ -81,7 +80,6 @@ XML global LandId = X-ray local Land + 912
 | Center Y | `200.538 mm` |
 | Size | `0.5 × 0.5 mm` |
 | Measurement | `565` |
-| Result code | `67` |
 
 ถ้านำ `17660` ไปค้นเป็น XML global ID โดยตรง จะได้ `AH80` ซึ่งเป็นตำแหน่งคนละจุดและผิดสำหรับแถว X-ray 17660
 
@@ -95,20 +93,14 @@ XML global LandId = X-ray local Land + 912
   - จำนวน Land ตรงกัน
   - XML global ID ต่อเนื่อง
 
-## 7. ข้อมูล Measurement และ Result code
+## 7. ข้อมูล Measurement
 
 Measurement ในคอลัมน์ T:
 
 - ต่ำสุด: `114`
 - สูงสุด: `695`
 - ค่าเฉลี่ย: `484.4993`
-
-Result code ในคอลัมน์ V:
-
-- Code `67`: `15,595` แถว
-- Code `0`: `2,067` แถว
-
-ยังไม่มี Metadata ในไฟล์ที่ยืนยันว่า `67` หรือ `0` หมายถึง Pass/Fail แบบใด โปรแกรมจึงแสดงชื่อเป็น **Result code** และไม่ตีความเอง
+- โปรแกรม v0.3.0 แสดงค่าเป็น Heatmap และ Histogram โดยไม่ใช้คอลัมน์สถานะอื่น
 
 ## 8. ข้อควรระวังเรื่องชื่อ CAD ซ้ำ
 
@@ -131,7 +123,15 @@ Component ID + X-ray local Land + XML global LandId + Coordinate
 - ค้นหมายเลขเครื่องแล้วซูมไปยัง CAD Land ที่ถูกต้อง
 - แสดงชื่อ CAD, global ID, พิกัดและข้อมูลผลตรวจพร้อมกัน
 - แสดงทุก Land เป็นกราฟิกที่ Zoom/Pan ได้
-- ใช้สีแยก Result code หรือสร้าง Heatmap จาก Measurement
+- แสดง Heatmap และ Histogram จาก Measurement
 - เตือนเมื่อชื่อ CAD ซ้ำ
 - แก้ Mapping ด้วยตนเองเมื่อไฟล์รุ่นอื่นไม่เรียงแบบเดิม
 - ส่งออกตาราง Mapping ที่รวมข้อมูลทั้งสองไฟล์
+
+
+## อัปเดต v0.3.0
+
+- ไม่ใช้ Result Code ในการ Mapping หรือแสดงผลอีกต่อไป
+- Measurement แสดงเป็น Heatmap และ Histogram
+- Viewer แสดงเฉพาะ Part ที่พบในข้อมูลดิบ โดยไฟล์ตัวอย่างนี้แสดงเฉพาะ U1
+- หากข้อมูลดิบมีหลาย Part โปรแกรมจะแยก Component, Mapping และ Histogram ให้แต่ละ Part
