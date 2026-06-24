@@ -1,0 +1,9 @@
+{
+  "name": "bga-land-mapper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/test-parsers.mjs"
+  }
+}

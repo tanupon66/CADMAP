@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1220" />
+  <meta name="description" content="PWA สำหรับจับคู่หมายเลข Land จากเครื่อง X-ray กับชื่อและพิกัด CAD XML" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="./styles.css" />
+  <title>BGA Land Mapper</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="./icons/icon.svg" alt="" class="brand-icon" />
+      <div>
+        <h1>BGA Land Mapper</h1>
+        <p>CAD XML ↔ X-ray Land Location</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span id="projectStatus" class="status-pill muted">ยังไม่ได้เปิดโปรเจกต์</span>
+      <button id="installButton" class="ghost hidden" type="button">ติดตั้งแอป</button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="left-panel panel">
+      <section class="panel-section import-section">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">1. IMPORT</span>
+            <h2>นำเข้าไฟล์</h2>
+          </div>
+          <button id="resetButton" class="icon-button" type="button" title="ล้างโปรเจกต์">↺</button>
+        </div>
+        <label id="dropZone" class="drop-zone">
+          <input id="projectFile" type="file" accept=".zip,.xml,.xlsx" hidden />
+          <span class="drop-icon">⌁</span>
+          <strong>วาง ZIP ที่นี่ หรือคลิกเลือก</strong>
+          <small>รองรับ ZIP ที่มี XML + XLSX หรือเลือกไฟล์แยกทีละไฟล์</small>
+        </label>
+        <div class="file-row"><span>CAD XML</span><strong id="xmlFileName">—</strong></div>
+        <div class="file-row"><span>X-ray XLSX</span><strong id="xlsxFileName">—</strong></div>
+        <div id="progressWrap" class="progress-wrap hidden"><div id="progressBar" class="progress-bar"></div></div>
+        <p id="importMessage" class="helper-text">ไฟล์จะถูกประมวลผลในเครื่อง ไม่อัปโหลดไปยังเซิร์ฟเวอร์</p>
+      </section>
+
+      <section class="panel-section">
+        <span class="eyebrow">2. AUTO DETECT</span>
+        <h2>โครงสร้างข้อมูล X-ray</h2>
+        <div class="form-grid">
+          <label>Component<select id="componentColumn"></select></label>
+          <label>Package<select id="packageColumn"></select></label>
+          <label>Land number<select id="landColumn"></select></label>
+          <label>Measurement<select id="measurementColumn"></select></label>
+          <label>Result code<select id="resultColumn"></select></label>
+        </div>
+        <button id="remapButton" class="primary full" type="button" disabled>คำนวณ Mapping ใหม่</button>
+      </section>
+
+      <section class="panel-section stats-section">
+        <span class="eyebrow">3. SUMMARY</span>
+        <div class="stat-grid">
+          <div class="stat"><span>Mapped</span><strong id="mappedStat">0</strong></div>
+          <div class="stat"><span>Unmapped</span><strong id="unmappedStat">0</strong></div>
+          <div class="stat"><span>XML lands</span><strong id="xmlLandStat">0</strong></div>
+          <div class="stat"><span>Components</span><strong id="componentStat">0</strong></div>
+        </div>
+        <div id="mappingFormula" class="formula-card">ยังไม่มีสูตร Mapping</div>
+      </section>
+
+      <section class="panel-section">
+        <span class="eyebrow">4. VIEW</span>
+        <label>Component
+          <select id="componentSelect"></select>
+        </label>
+        <label class="toggle-row"><input id="heatmapToggle" type="checkbox" /><span>Heatmap จาก Measurement</span></label>
+        <label class="toggle-row"><input id="labelToggle" type="checkbox" /><span>แสดงชื่อ CAD เมื่อซูมเข้า</span></label>
+        <div class="button-grid">
+          <button id="fitButton" type="button">Fit</button>
+          <button id="zoomInButton" type="button">＋</button>
+          <button id="zoomOutButton" type="button">−</button>
+        </div>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <div class="workspace-toolbar panel">
+        <div class="search-wrap">
+          <span>⌕</span>
+          <input id="searchInput" type="search" placeholder="ค้นหา 17660, XML ID 18572 หรือ CU71" />
+          <button id="searchButton" type="button">ค้นหา</button>
+        </div>
+        <div class="toolbar-actions">
+          <button id="manualButton" type="button" disabled>แก้ Mapping</button>
+          <button id="undoButton" type="button" disabled>Undo</button>
+          <button id="exportCsvButton" type="button" disabled>Export CSV</button>
+          <button id="exportJsonButton" type="button" disabled>Backup JSON</button>
+        </div>
+      </div>
+
+      <div class="viewer panel">
+        <canvas id="cadCanvas"></canvas>
+        <div class="viewer-hud top-left">
+          <span id="viewerTitle">ไม่มีข้อมูล</span>
+          <small id="viewerSubtitle">นำเข้าไฟล์เพื่อแสดงตำแหน่ง Land</small>
+        </div>
+        <div class="viewer-hud bottom-left legend">
+          <span><i class="dot code0"></i> Result code 0</span>
+          <span><i class="dot codeOther"></i> Result code อื่น</span>
+          <span><i class="dot selected"></i> จุดที่เลือก</span>
+        </div>
+        <div id="manualBanner" class="manual-banner hidden">โหมดแก้ Mapping: คลิก Land ที่ต้องการนำมาจับคู่กับรายการที่เลือก</div>
+        <div id="tooltip" class="tooltip hidden"></div>
+      </div>
+
+      <div class="table-panel panel">
+        <div class="table-header">
+          <div>
+            <span class="eyebrow">MAPPING TABLE</span>
+            <strong id="tableSummary">0 รายการ</strong>
+          </div>
+          <div class="table-controls">
+            <select id="tableFilter">
+              <option value="all">ทั้งหมด</option>
+              <option value="code0">Result code 0</option>
+              <option value="other">Result code อื่น</option>
+              <option value="duplicate">ชื่อ CAD ซ้ำ</option>
+              <option value="manual">แก้ด้วยตนเอง</option>
+              <option value="unmapped">Unmapped</option>
+            </select>
+            <button id="prevPage" type="button">‹</button>
+            <span id="pageLabel">1 / 1</span>
+            <button id="nextPage" type="button">›</button>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>X-ray Land</th><th>XML ID</th><th>CAD Name</th><th>X</th><th>Y</th><th>Measurement</th><th>Code</th><th>Confidence</th></tr></thead>
+            <tbody id="mappingTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <aside class="right-panel panel">
+      <section class="panel-section detail-header">
+        <span class="eyebrow">SELECTED LAND</span>
+        <h2 id="selectedTitle">ยังไม่ได้เลือก</h2>
+        <p id="selectedSubTitle">ค้นหาหรือคลิกตำแหน่งบนกราฟิก</p>
+      </section>
+      <section class="panel-section detail-grid" id="detailGrid">
+        <div><span>X-ray local</span><strong id="dLocal">—</strong></div>
+        <div><span>XML global ID</span><strong id="dGlobal">—</strong></div>
+        <div><span>CAD name</span><strong id="dCad">—</strong></div>
+        <div><span>Component</span><strong id="dComponent">—</strong></div>
+        <div><span>Position X</span><strong id="dX">—</strong></div>
+        <div><span>Position Y</span><strong id="dY">—</strong></div>
+        <div><span>Measurement</span><strong id="dMeasurement">—</strong></div>
+        <div><span>Result code</span><strong id="dResult">—</strong></div>
+        <div><span>Confidence</span><strong id="dConfidence">—</strong></div>
+        <div><span>Source row</span><strong id="dRow">—</strong></div>
+      </section>
+      <section class="panel-section">
+        <label>ชื่อแสดงผล / หมายเหตุ
+          <input id="aliasInput" type="text" placeholder="เช่น จุดที่ต้องตรวจซ้ำ" disabled />
+        </label>
+        <button id="saveAliasButton" class="full" type="button" disabled>บันทึกหมายเหตุ</button>
+        <p id="duplicateWarning" class="warning hidden"></p>
+      </section>
+      <section class="panel-section raw-section">
+        <div class="section-heading"><h2>ข้อมูลต้นทาง</h2><button id="copyRawButton" class="icon-button" type="button" disabled>⧉</button></div>
+        <pre id="rawData">—</pre>
+      </section>
+      <section class="panel-section about-section">
+        <strong>วิธี Mapping ของโปรเจกต์นี้</strong>
+        <p>จับคู่ Component และ Package ก่อน จากนั้นใช้ลำดับ Land ภายใน Component ไปยัง Land ที่เรียงตาม XML global ID จึงไม่ควรเทียบหมายเลขเครื่องกับ XML ID โดยตรง</p>
+      </section>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
