@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
-  <title>BGA Land Mapper</title>
+  <title>BGA Land Mapper v0.2.0</title>
 </head>
 <body>
   <header class="topbar">
@@ -41,6 +41,10 @@
           <strong>วาง ZIP ที่นี่ หรือคลิกเลือก</strong>
           <small>รองรับ ZIP ที่มี XML + XLSX หรือเลือกไฟล์แยกทีละไฟล์</small>
         </label>
+        <div class="mini-actions">
+          <button id="restoreButton" type="button" disabled>นำเข้า Backup JSON</button>
+          <input id="restoreFile" type="file" accept=".json,application/json" hidden />
+        </div>
         <div class="file-row"><span>CAD XML</span><strong id="xmlFileName">—</strong></div>
         <div class="file-row"><span>X-ray XLSX</span><strong id="xlsxFileName">—</strong></div>
         <div id="progressWrap" class="progress-wrap hidden"><div id="progressBar" class="progress-bar"></div></div>
@@ -94,8 +98,10 @@
           <button id="searchButton" type="button">ค้นหา</button>
         </div>
         <div class="toolbar-actions">
-          <button id="manualButton" type="button" disabled>แก้ Mapping</button>
+          <button id="manualButton" type="button" disabled>เลือก CAD ใหม่</button>
+          <button id="teachButton" type="button" disabled>Manual Teach</button>
           <button id="undoButton" type="button" disabled>Undo</button>
+          <button id="redoButton" type="button" disabled>Redo</button>
           <button id="exportCsvButton" type="button" disabled>Export CSV</button>
           <button id="exportJsonButton" type="button" disabled>Backup JSON</button>
         </div>
@@ -138,7 +144,7 @@
         </div>
         <div class="table-scroll">
           <table>
-            <thead><tr><th>X-ray Land</th><th>XML ID</th><th>CAD Name</th><th>X</th><th>Y</th><th>Measurement</th><th>Code</th><th>Confidence</th></tr></thead>
+            <thead><tr><th>X-ray Land</th><th>XML ID</th><th>CAD Name</th><th>X</th><th>Y</th><th>Measurement</th><th>Code</th><th>Confidence</th><th>Status</th></tr></thead>
             <tbody id="mappingTableBody"></tbody>
           </table>
         </div>
@@ -162,6 +168,18 @@
         <div><span>Result code</span><strong id="dResult">—</strong></div>
         <div><span>Confidence</span><strong id="dConfidence">—</strong></div>
         <div><span>Source row</span><strong id="dRow">—</strong></div>
+        <div><span>Mapping method</span><strong id="dMethod">—</strong></div>
+        <div><span>Anchor</span><strong id="dAnchor">—</strong></div>
+      </section>
+      <section class="panel-section manual-actions-section">
+        <span class="eyebrow">MANUAL ACTIONS</span>
+        <div class="manual-action-grid">
+          <button id="anchorButton" type="button" disabled>ล็อกเป็น Anchor</button>
+          <button id="unmapButton" type="button" disabled>ยกเลิก Mapping</button>
+          <button id="nudgePrevButton" type="button" disabled>เลื่อน CAD −1</button>
+          <button id="nudgeNextButton" type="button" disabled>เลื่อน CAD +1</button>
+        </div>
+        <p class="helper-text">Anchor คือจุดที่ยืนยันว่าถูกต้อง โปรแกรมจะใช้จุดเหล่านี้เรียนรู้ทิศทางและ Offset ของ Land ที่เหลือ</p>
       </section>
       <section class="panel-section">
         <label>ชื่อแสดงผล / หมายเหตุ
@@ -180,6 +198,79 @@
       </section>
     </aside>
   </main>
+
+  <div id="teachOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="teachTitle">
+    <div class="teach-dialog panel">
+      <div class="teach-header">
+        <div>
+          <span class="eyebrow">MANUAL TEACH → PATTERN PREVIEW</span>
+          <h2 id="teachTitle">สอนแพตเทิร์น Mapping</h2>
+          <p id="teachComponentLabel">เลือก Anchor อย่างน้อย 1 จุด แล้วให้โปรแกรมคำนวณต่อ</p>
+        </div>
+        <button id="closeTeachButton" class="icon-button" type="button" aria-label="ปิด">✕</button>
+      </div>
+      <div class="teach-layout">
+        <section class="teach-card">
+          <div class="teach-card-heading">
+            <div><span class="eyebrow">ANCHORS</span><strong id="anchorCountLabel">0 จุด</strong></div>
+            <button id="clearAnchorsButton" type="button">ปลด Anchor ทั้งหมด</button>
+          </div>
+          <div id="anchorList" class="anchor-list"><p class="empty-state">ยังไม่มี Anchor</p></div>
+          <p class="helper-text">เลือก Land ในตารางหรือกราฟิก กด “ล็อกเป็น Anchor” หรือใช้ “เลือก CAD ใหม่” เพื่อย้ายและล็อกจุดอ้างอิง</p>
+        </section>
+        <section class="teach-card">
+          <span class="eyebrow">PATTERN SETTINGS</span>
+          <div class="teach-form-grid">
+            <label>ทิศทาง
+              <select id="patternDirection">
+                <option value="auto">ตรวจอัตโนมัติจาก Anchor</option>
+                <option value="forward">Forward: เลขเพิ่มตาม CAD</option>
+                <option value="reverse">Reverse: เลขเพิ่มสวน CAD</option>
+              </select>
+            </label>
+            <label>Shift เพิ่มเติม<input id="patternShift" type="number" step="1" value="0" /></label>
+            <label>เริ่ม X-ray Land<input id="patternStart" type="number" step="1" placeholder="อัตโนมัติ" /></label>
+            <label>สิ้นสุด X-ray Land<input id="patternEnd" type="number" step="1" placeholder="อัตโนมัติ" /></label>
+          </div>
+          <label class="toggle-row"><input id="preserveAnchors" type="checkbox" checked /><span>รักษา Anchor ไว้เสมอ แม้สูตรขัดแย้ง</span></label>
+          <div class="teach-button-row">
+            <button id="previewPatternButton" class="primary" type="button">สร้าง Preview</button>
+            <button id="fillBetweenButton" type="button">Preview เฉพาะระหว่าง Anchor</button>
+            <button id="clearPreviewButton" type="button" disabled>ล้าง Preview</button>
+          </div>
+        </section>
+        <section class="teach-card preview-card">
+          <div class="teach-card-heading">
+            <div><span class="eyebrow">PREVIEW</span><strong id="previewTitle">ยังไม่มี Preview</strong></div>
+            <span id="previewDirectionBadge" class="status-pill muted">—</span>
+          </div>
+          <div class="preview-stats">
+            <div><span>ใช้ได้</span><strong id="previewApplicable">0</strong></div>
+            <div><span>มั่นใจสูง</span><strong id="previewHigh">0</strong></div>
+            <div><span>ต้องตรวจ</span><strong id="previewReview">0</strong></div>
+            <div><span>Conflict</span><strong id="previewConflict">0</strong></div>
+          </div>
+          <div id="previewFormula" class="formula-card">วาง Anchor แล้วกดสร้าง Preview</div>
+          <p id="previewWarning" class="warning hidden"></p>
+          <div class="teach-button-row apply-row">
+            <button id="applyPatternButton" class="primary" type="button" disabled>ยืนยันและใช้ Pattern</button>
+            <button id="applyHighButton" type="button" disabled>ใช้เฉพาะ Confidence สูง</button>
+          </div>
+        </section>
+        <section class="teach-card">
+          <span class="eyebrow">QUICK OPERATIONS</span>
+          <div class="quick-grid">
+            <button id="previewForwardButton" type="button">Preview Forward ทั้งชุด</button>
+            <button id="previewReverseButton" type="button">Preview Reverse ทั้งชุด</button>
+            <button id="shiftAllPrevButton" type="button">Shift ผลปัจจุบัน −1</button>
+            <button id="shiftAllNextButton" type="button">Shift ผลปัจจุบัน +1</button>
+            <button id="unmapRangeButton" class="danger-button" type="button">Unmap ช่วงที่กำหนด</button>
+          </div>
+          <p class="helper-text">ทุกคำสั่งบันทึกใน History และย้อนกลับด้วย Undo/Redo ได้</p>
+        </section>
+      </div>
+    </div>
+  </div>
 
   <div id="toast" class="toast hidden"></div>
   <script type="module" src="./app.js"></script>

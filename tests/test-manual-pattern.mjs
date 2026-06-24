@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { createSequencePreview, stateForLand } from '../manual-pattern.js';
+const component={id:'1',lands:Array.from({length:10},(_,i)=>({componentId:'1',globalId:100+i,cadName:`L${i+1}`,left:i,top:0,centerX:i,centerY:0,width:1,length:1}))};
+const mappings=Array.from({length:10},(_,i)=>({localIndex:i+1,componentId:'1',globalId:100+i,mapped:true,cadName:`L${i+1}`,manual:false,confidence:100,anchorLocked:false}));
+Object.assign(mappings[2],stateForLand(mappings[2],component.lands[4],{anchorLocked:true}));
+Object.assign(mappings[7],stateForLand(mappings[7],component.lands[9],{anchorLocked:true}));
+const forward=createSequencePreview({mappings,component,direction:'auto'});
+assert.equal(forward.direction,'forward'); assert.equal(forward.fit.constant,2); assert.equal(forward.proposals.find(p=>p.localIndex===1).land.globalId,102);
+const reverseMappings=Array.from({length:10},(_,i)=>({localIndex:i+1,componentId:'1',globalId:109-i,mapped:true,anchorLocked:i===0||i===9}));
+const reverse=createSequencePreview({mappings:reverseMappings,component,direction:'auto'}); assert.equal(reverse.direction,'reverse'); assert.equal(reverse.proposals[0].land.globalId,109);
+console.log('manual pattern tests passed');

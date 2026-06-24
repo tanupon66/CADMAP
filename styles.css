@@ -129,3 +129,49 @@ tbody tr.active { background: rgba(86,214,197,.11); }
   .right-panel { position: static; width: auto; display: block; }
   .form-grid { grid-template-columns: 1fr; }
 }
+
+/* v0.2.0 Manual Teach */
+.mini-actions { display: flex; gap: 7px; margin-top: 10px; }
+.mini-actions button { width: 100%; font-size: 11px; }
+.manual-actions-section { background: rgba(86,214,197,.025); }
+.manual-action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 10px; }
+.manual-action-grid button { min-height: 38px; font-size: 10px; }
+.danger-button { color: #ffd4d8; border-color: rgba(255,107,117,.34); background: rgba(255,107,117,.07); }
+tbody tr.anchor-row { box-shadow: inset 3px 0 0 #ffd166; }
+tbody tr.preview-row { background: rgba(43,167,255,.06); }
+.status-chip { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 3px 7px; font-size: 9px; color: var(--muted); }
+.status-chip.anchor { color: #ffe09a; border-color: rgba(255,209,102,.32); background: rgba(255,209,102,.08); }
+.status-chip.manual { color: #d8caff; border-color: rgba(157,124,255,.34); background: rgba(157,124,255,.08); }
+.status-chip.auto { color: #b8f4e9; border-color: rgba(86,214,197,.24); background: rgba(86,214,197,.05); }
+.status-chip.unmapped { color: #ffb4ba; border-color: rgba(255,107,117,.28); background: rgba(255,107,117,.06); }
+.modal-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 18px; background: rgba(3,7,13,.78); backdrop-filter: blur(7px); }
+.teach-dialog { width: min(1080px, 96vw); max-height: 92vh; overflow: auto; border-radius: 18px; }
+.teach-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--line-soft); background: rgba(12,20,33,.97); backdrop-filter: blur(12px); }
+.teach-header h2 { margin: 4px 0 4px; font-size: 20px; }
+.teach-header p { margin: 0; color: var(--muted); font-size: 11px; }
+.teach-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; }
+.teach-card { min-width: 0; padding: 14px; border: 1px solid var(--line-soft); border-radius: 14px; background: rgba(255,255,255,.018); }
+.teach-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.teach-card-heading strong { display: block; margin-top: 3px; font-size: 13px; }
+.teach-card-heading button { font-size: 10px; }
+.teach-form-grid { display: grid; grid-template-columns: 1.35fr .65fr; gap: 10px; margin-top: 10px; }
+.teach-button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.teach-button-row button { flex: 1 1 145px; }
+.anchor-list { max-height: 210px; overflow: auto; border: 1px solid var(--line-soft); border-radius: 10px; }
+.anchor-item { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; padding: 9px 10px; border-bottom: 1px solid var(--line-soft); font-size: 10px; }
+.anchor-item:last-child { border-bottom: 0; }
+.anchor-item span { color: var(--muted); }
+.anchor-item strong { color: var(--text); }
+.anchor-item button { padding: 4px 7px; font-size: 9px; }
+.empty-state { margin: 0; padding: 18px; text-align: center; color: var(--muted); font-size: 10px; }
+.preview-card { background: linear-gradient(180deg, rgba(43,167,255,.045), rgba(255,255,255,.012)); }
+.preview-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 7px; }
+.preview-stats div { padding: 9px; border: 1px solid var(--line-soft); border-radius: 10px; }
+.preview-stats span { display: block; color: var(--muted); font-size: 9px; }
+.preview-stats strong { display: block; margin-top: 3px; font-size: 17px; }
+.apply-row { margin-top: 10px; }
+.quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.quick-grid button { min-height: 39px; font-size: 10px; }
+.manual-banner.preview-active { color: #bfe8ff; background: rgba(15,62,95,.92); border-color: rgba(43,167,255,.46); }
+@media (max-width: 900px) { .teach-layout { grid-template-columns: 1fr; } .teach-form-grid { grid-template-columns: 1fr 1fr; } .preview-stats { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .modal-overlay { padding: 0; } .teach-dialog { width: 100vw; max-height: 100vh; min-height: 100vh; border-radius: 0; } .teach-form-grid, .quick-grid { grid-template-columns: 1fr; } }
