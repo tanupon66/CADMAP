@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
-  <title>BGA Land Mapper v0.4.0</title>
+  <title>BGA Land Mapper v0.5.0</title>
 </head>
 <body>
   <header class="topbar">
@@ -81,6 +81,12 @@
         </label>
         <label class="toggle-row"><input id="heatmapToggle" type="checkbox" checked /><span>Heatmap จาก Measurement</span></label>
         <label class="toggle-row"><input id="labelToggle" type="checkbox" /><span>แสดงชื่อ CAD เมื่อซูมเข้า</span></label>
+        <label class="toggle-row duplicate-toggle"><input id="duplicateToggle" type="checkbox" checked /><span>ไฮไลต์ตำแหน่งชื่อ CAD ซ้ำ</span></label>
+        <label class="toggle-row"><input id="duplicateOnlyToggle" type="checkbox" /><span>ทำตำแหน่งที่ไม่ซ้ำให้จาง</span></label>
+        <label>ไปยังชื่อ CAD ซ้ำ
+          <select id="duplicateNameSelect"><option value="">— เลือกชื่อซ้ำ —</option></select>
+        </label>
+        <div id="duplicateSummaryMini" class="duplicate-summary-mini">ยังไม่มีข้อมูลชื่อซ้ำ</div>
         <div class="button-grid">
           <button id="fitButton" type="button">Fit</button>
           <button id="zoomInButton" type="button">＋</button>
@@ -116,6 +122,7 @@
           <span class="measurement-gradient"></span>
           <span>Measurement ต่ำ → สูง</span>
           <span><i class="dot selected"></i> จุดที่เลือก</span>
+          <span><i class="dot duplicate"></i> ชื่อ CAD ซ้ำ</span>
         </div>
         <div id="manualBanner" class="manual-banner hidden">โหมดแก้ Mapping: คลิก Land ที่ต้องการนำมาจับคู่กับรายการที่เลือก</div>
         <div id="tooltip" class="tooltip hidden"></div>
@@ -166,6 +173,21 @@
         <div><span>Source row</span><strong id="dRow">—</strong></div>
         <div><span>Mapping method</span><strong id="dMethod">—</strong></div>
         <div><span>Anchor</span><strong id="dAnchor">—</strong></div>
+      </section>
+      <section id="duplicatePanel" class="panel-section duplicate-panel">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">DUPLICATE CAD NAMES</span>
+            <h2>ตำแหน่งชื่อซ้ำ</h2>
+          </div>
+          <strong id="duplicateGroupCount" class="duplicate-count-badge">0</strong>
+        </div>
+        <p id="duplicatePanelMessage" class="helper-text">เลือก Land ที่มีชื่อ CAD ซ้ำ หรือเลือกชื่อจากเมนูด้านซ้าย</p>
+        <div id="duplicatePositionList" class="duplicate-position-list"><p class="empty-state">ยังไม่ได้เลือกกลุ่มชื่อซ้ำ</p></div>
+        <div class="duplicate-panel-actions">
+          <button id="fitDuplicateButton" type="button" disabled>Fit ทุกตำแหน่ง</button>
+          <button id="clearDuplicateButton" type="button" disabled>ล้างการเลือกกลุ่ม</button>
+        </div>
       </section>
       <section class="panel-section histogram-section">
         <div class="section-heading histogram-heading">

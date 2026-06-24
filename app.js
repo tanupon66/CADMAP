@@ -26,6 +26,7 @@ const els = {
   measurementColumn: $('measurementColumn'), remapButton: $('remapButton'),
   mappedStat: $('mappedStat'), unmappedStat: $('unmappedStat'), xmlLandStat: $('xmlLandStat'), componentStat: $('componentStat'),
   mappingFormula: $('mappingFormula'), componentSelect: $('componentSelect'), heatmapToggle: $('heatmapToggle'), labelToggle: $('labelToggle'),
+  duplicateToggle: $('duplicateToggle'), duplicateOnlyToggle: $('duplicateOnlyToggle'), duplicateNameSelect: $('duplicateNameSelect'), duplicateSummaryMini: $('duplicateSummaryMini'),
   fitButton: $('fitButton'), zoomInButton: $('zoomInButton'), zoomOutButton: $('zoomOutButton'),
   searchInput: $('searchInput'), searchButton: $('searchButton'), manualButton: $('manualButton'), teachButton: $('teachButton'),
   undoButton: $('undoButton'), redoButton: $('redoButton'), exportCsvButton: $('exportCsvButton'), exportJsonButton: $('exportJsonButton'),
@@ -45,6 +46,7 @@ const els = {
   selectedBinRange: $('selectedBinRange'), selectedBinCount: $('selectedBinCount'), selectedBinPercent: $('selectedBinPercent'), selectedBinCumulative: $('selectedBinCumulative'),
   anchorButton: $('anchorButton'), unmapButton: $('unmapButton'), nudgePrevButton: $('nudgePrevButton'), nudgeNextButton: $('nudgeNextButton'),
   aliasInput: $('aliasInput'), saveAliasButton: $('saveAliasButton'), duplicateWarning: $('duplicateWarning'), rawData: $('rawData'), copyRawButton: $('copyRawButton'),
+  duplicatePanel: $('duplicatePanel'), duplicateGroupCount: $('duplicateGroupCount'), duplicatePanelMessage: $('duplicatePanelMessage'), duplicatePositionList: $('duplicatePositionList'), fitDuplicateButton: $('fitDuplicateButton'), clearDuplicateButton: $('clearDuplicateButton'),
   teachOverlay: $('teachOverlay'), closeTeachButton: $('closeTeachButton'), teachComponentLabel: $('teachComponentLabel'),
   anchorCountLabel: $('anchorCountLabel'), anchorList: $('anchorList'), clearAnchorsButton: $('clearAnchorsButton'),
   patternDirection: $('patternDirection'), patternShift: $('patternShift'), patternStart: $('patternStart'), patternEnd: $('patternEnd'), preserveAnchors: $('preserveAnchors'),
@@ -62,6 +64,7 @@ const state = {
   view: { scale: 1, offsetX: 0, offsetY: 0 }, dragging: false, lastPointer: null, dragStart: null,
   fileNames: { xml: '', xlsx: '' }, installPrompt: null,
   histogram: { rangeMin: null, rangeMax: null, selectedBin: null, hoveredBin: null, layout: null, drag: null, filterEnabled: false },
+  duplicateView: { enabled: true, dimOthers: false, selectedName: '' },
 };
 
 const ctx = els.canvas.getContext('2d', { alpha: false });
@@ -104,7 +107,84 @@ function mappingByGlobalId() {
 function duplicateCountForLand(land) {
   const component = state.xmlData?.componentById.get(String(land?.componentId));
   if (!component || !land?.cadName) return 1;
-  return component.lands.filter((item) => item.cadName === land.cadName).length || 1;
+  return duplicateGroupsForComponent(component).get(String(land.cadName).trim())?.length || 1;
+}
+const duplicateGroupCache = new WeakMap();
+function duplicateGroupsForComponent(component = currentComponent()) {
+  if (!component) return new Map();
+  const cached = duplicateGroupCache.get(component);
+  if (cached) return cached;
+  const all = new Map();
+  for (const land of component.lands || []) {
+    const name = String(land.cadName || '').trim();
+    if (!name) continue;
+    if (!all.has(name)) all.set(name, []);
+    all.get(name).push(land);
+  }
+  const duplicates = new Map([...all].filter(([, lands]) => lands.length > 1).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })));
+  duplicateGroupCache.set(component, duplicates);
+  return duplicates;
+}
+function selectedDuplicateLands() {
+  return duplicateGroupsForComponent().get(state.duplicateView.selectedName) || [];
+}
+function setSelectedDuplicateName(name, { fit = false, selectFirst = false } = {}) {
+  const groups = duplicateGroupsForComponent();
+  state.duplicateView.selectedName = groups.has(name) ? name : '';
+  if (els.duplicateNameSelect) els.duplicateNameSelect.value = state.duplicateView.selectedName;
+  renderDuplicatePanel();
+  if (selectFirst && state.duplicateView.selectedName) {
+    const first = groups.get(state.duplicateView.selectedName)?.[0];
+    if (first) selectLand(first);
+  }
+  if (fit && state.duplicateView.selectedName) fitDuplicateGroup();
+  else draw();
+}
+function refreshDuplicateControls() {
+  const groups = duplicateGroupsForComponent();
+  const current = groups.has(state.duplicateView.selectedName) ? state.duplicateView.selectedName : '';
+  state.duplicateView.selectedName = current;
+  els.duplicateNameSelect.innerHTML = '';
+  const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = groups.size ? `— เลือกจาก ${formatInt.format(groups.size)} ชื่อซ้ำ —` : '— ไม่พบชื่อซ้ำ —'; els.duplicateNameSelect.append(placeholder);
+  for (const [name, lands] of groups) { const option = document.createElement('option'); option.value = name; option.textContent = `${name} · ${formatInt.format(lands.length)} ตำแหน่ง`; els.duplicateNameSelect.append(option); }
+  els.duplicateNameSelect.value = current;
+  els.duplicateNameSelect.disabled = groups.size === 0;
+  els.duplicateToggle.disabled = groups.size === 0;
+  els.duplicateOnlyToggle.disabled = groups.size === 0 || !state.duplicateView.enabled;
+  const duplicateLandCount = [...groups.values()].reduce((sum, lands) => sum + lands.length, 0);
+  els.duplicateSummaryMini.textContent = groups.size ? `${formatInt.format(groups.size)} ชื่อซ้ำ · รวม ${formatInt.format(duplicateLandCount)} ตำแหน่งใน ${currentComponent()?.name || 'Part'}` : 'ไม่พบชื่อ CAD ซ้ำใน Part นี้';
+  renderDuplicatePanel();
+}
+function renderDuplicatePanel() {
+  const groups = duplicateGroupsForComponent();
+  const name = state.duplicateView.selectedName;
+  const lands = groups.get(name) || [];
+  els.duplicateGroupCount.textContent = formatInt.format(groups.size);
+  els.duplicatePositionList.innerHTML = '';
+  els.fitDuplicateButton.disabled = lands.length === 0;
+  els.clearDuplicateButton.disabled = lands.length === 0;
+  if (!groups.size) {
+    els.duplicatePanelMessage.textContent = 'ไม่พบชื่อ CAD ซ้ำใน Part ที่เลือก';
+    els.duplicatePositionList.innerHTML = '<p class="empty-state">ไม่มีตำแหน่งซ้ำ</p>';
+    return;
+  }
+  if (!lands.length) {
+    els.duplicatePanelMessage.textContent = `พบ ${formatInt.format(groups.size)} ชื่อซ้ำ เลือก Land หรือชื่อจากเมนูด้านซ้ายเพื่อดูตำแหน่งทั้งหมด`;
+    els.duplicatePositionList.innerHTML = '<p class="empty-state">ยังไม่ได้เลือกกลุ่มชื่อซ้ำ</p>';
+    return;
+  }
+  els.duplicatePanelMessage.textContent = `${name} พบซ้ำ ${formatInt.format(lands.length)} ตำแหน่ง เส้นประบนกราฟิกเชื่อมตำแหน่งในกลุ่มเดียวกัน`;
+  const byGlobal = mappingByGlobalId();
+  lands.forEach((land, index) => {
+    const mapping = byGlobal.get(Number(land.globalId));
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'duplicate-position-item';
+    if (state.selected && Number(state.selected.globalId) === Number(land.globalId)) button.classList.add('active');
+    const text = document.createElement('div'); const title = document.createElement('strong'); title.textContent = `${name} · XML ${land.globalId}`;
+    const meta = document.createElement('span'); meta.textContent = `X ${formatFloat.format(land.centerX)} · Y ${formatFloat.format(land.centerY)}${mapping ? ` · X-ray ${mapping.localIndex}` : ' · ไม่มีข้อมูลดิบ'}`;
+    text.append(title, meta); const badge = document.createElement('i'); badge.className = 'duplicate-position-index'; badge.textContent = String(index + 1); button.append(text, badge);
+    button.addEventListener('click', () => { selectLand(land); centerOn(land.centerX, land.centerY); });
+    els.duplicatePositionList.append(button);
+  });
 }
 function normalizeMappings() {
   for (const mapping of state.mappingData?.mappings || []) {
@@ -161,7 +241,7 @@ function refreshAfterEdit() {
     els.manualBanner.classList.add('hidden');
     els.manualBanner.classList.remove('preview-active');
   }
-  recomputeStats(); updateStats(); updateDetails(); renderTable(); renderTeachPanel(); draw(); renderHistogram(); refreshHistoryButtons();
+  recomputeStats(); updateStats(); updateDetails(); renderTable(); renderTeachPanel(); renderDuplicatePanel(); draw(); renderHistogram(); refreshHistoryButtons();
 }
 
 function columnOptionLabel(descriptor) {
@@ -217,6 +297,7 @@ function populateComponents(preferredId = null) {
   const chosen = chosenCandidate != null && allowedIds.has(String(chosenCandidate)) ? String(chosenCandidate) : (matched[0] ? String(matched[0].componentId) : null);
   state.selectedComponentId = chosen;
   if (chosen != null) els.componentSelect.value = chosen;
+  refreshDuplicateControls();
 }
 function updateStats() {
   const stats = state.mappingData?.stats;
@@ -277,11 +358,11 @@ async function processFile(file) {
   finally { setLoading(false); els.projectFile.value = ''; }
 }
 function resetProject() {
-  Object.assign(state, { xmlText: null, xlsxBuffer: null, xmlData: null, xlsxData: null, schema: null, mappingData: null, selectedComponentId: null, selected: null, hoveredLand: null, manualMode: false, preview: null, undoStack: [], redoStack: [], page: 1, fileNames: { xml: '', xlsx: '' }, view: { scale: 1, offsetX: 0, offsetY: 0 }, dragStart: null });
-  resetHistogramState(); els.histogramOverlay.classList.add('hidden');
+  Object.assign(state, { xmlText: null, xlsxBuffer: null, xmlData: null, xlsxData: null, schema: null, mappingData: null, selectedComponentId: null, selected: null, hoveredLand: null, manualMode: false, preview: null, undoStack: [], redoStack: [], page: 1, fileNames: { xml: '', xlsx: '' }, view: { scale: 1, offsetX: 0, offsetY: 0 }, dragStart: null, duplicateView: { enabled: true, dimOthers: false, selectedName: '' } });
+  resetHistogramState(); els.histogramOverlay.classList.add('hidden'); els.duplicateToggle.checked = true; els.duplicateOnlyToggle.checked = false;
   els.xmlFileName.textContent = '—'; els.xlsxFileName.textContent = '—'; els.importMessage.textContent = 'ไฟล์จะถูกประมวลผลในเครื่อง ไม่อัปโหลดไปยังเซิร์ฟเวอร์';
   for (const select of [els.componentColumn, els.packageColumn, els.landColumn, els.measurementColumn, els.componentSelect]) select.innerHTML = '';
-  els.mappingTableBody.innerHTML = ''; els.teachOverlay.classList.add('hidden'); clearDetails(); renderTeachPanel(); updateStats(); draw(); renderHistogram();
+  els.mappingTableBody.innerHTML = ''; els.teachOverlay.classList.add('hidden'); clearDetails(); refreshDuplicateControls(); renderTeachPanel(); updateStats(); draw(); renderHistogram();
 }
 function filteredMappings() {
   const mappings = currentMappings();
@@ -313,8 +394,9 @@ function renderTable() {
 }
 function selectMapping(mapping, center = false) {
   state.selected = mapping; state.manualMode = false; els.manualBanner.classList.add('hidden'); els.manualBanner.classList.remove('preview-active'); els.manualButton.textContent = 'เลือก CAD ใหม่';
-  if (mapping.componentId != null && String(mapping.componentId) !== String(state.selectedComponentId)) { state.selectedComponentId = String(mapping.componentId); els.componentSelect.value = String(mapping.componentId); fitView(); }
-  updateDetails(); renderTable(); if (center && Number.isFinite(mapping.centerX) && Number.isFinite(mapping.centerY)) centerOn(mapping.centerX, mapping.centerY); draw(); renderHistogram();
+  if (mapping.componentId != null && String(mapping.componentId) !== String(state.selectedComponentId)) { state.selectedComponentId = String(mapping.componentId); els.componentSelect.value = String(mapping.componentId); state.duplicateView.selectedName = ''; refreshDuplicateControls(); fitView(); }
+  if (mapping.duplicateCadNameCount > 1 && mapping.cadName) { state.duplicateView.selectedName = String(mapping.cadName).trim(); els.duplicateNameSelect.value = state.duplicateView.selectedName; }
+  updateDetails(); renderDuplicatePanel(); renderTable(); if (center && Number.isFinite(mapping.centerX) && Number.isFinite(mapping.centerY)) centerOn(mapping.centerX, mapping.centerY); draw(); renderHistogram();
 }
 function clearDetails() {
   state.selected = null; els.selectedTitle.textContent = 'ยังไม่ได้เลือก'; els.selectedSubTitle.textContent = 'ค้นหาหรือคลิกตำแหน่งบนกราฟิก';
@@ -331,7 +413,7 @@ function updateDetails() {
   els.dMethod.textContent = mapping.mappingMethod || (mapping.manual ? 'manual' : 'auto'); els.dAnchor.textContent = mapping.anchorLocked ? 'ล็อกแล้ว' : 'ไม่ล็อก';
   els.aliasInput.disabled = false; els.saveAliasButton.disabled = false; els.copyRawButton.disabled = !mapping.raw; els.aliasInput.value = mapping.alias || '';
   els.rawData.textContent = mapping.raw ? mapping.raw.map((value, index) => `${columnName(index)}: ${value ?? ''}`).join('\n') : JSON.stringify(mapping, null, 2);
-  if (mapping.duplicateCadNameCount > 1) { els.duplicateWarning.textContent = `ชื่อ CAD ${mapping.cadName} พบซ้ำ ${mapping.duplicateCadNameCount} ตำแหน่ง จึงต้องอ้างอิง X-ray Land, XML ID และพิกัดร่วมกัน`; els.duplicateWarning.classList.remove('hidden'); }
+  if (mapping.duplicateCadNameCount > 1) { state.duplicateView.selectedName = String(mapping.cadName || '').trim(); els.duplicateNameSelect.value = state.duplicateView.selectedName; els.duplicateWarning.textContent = `ชื่อ CAD ${mapping.cadName} พบซ้ำ ${mapping.duplicateCadNameCount} ตำแหน่ง ระบบไฮไลต์ทุกตำแหน่งบนกราฟิกและเชื่อมด้วยเส้นประ`; els.duplicateWarning.classList.remove('hidden'); }
   else els.duplicateWarning.classList.add('hidden');
   els.manualButton.disabled = false; els.anchorButton.disabled = !mapping.mapped; els.anchorButton.textContent = mapping.anchorLocked ? 'ปลด Anchor' : 'ล็อกเป็น Anchor'; els.unmapButton.disabled = !mapping.mapped; els.nudgePrevButton.disabled = !mapping.mapped; els.nudgeNextButton.disabled = !mapping.mapped;
   document.querySelector('.right-panel')?.classList.add('open');
@@ -346,6 +428,26 @@ function fitView() {
   state.view.scale = scale; state.view.offsetX = els.canvas.clientWidth / 2 - ((minX + maxX) / 2) * scale; state.view.offsetY = els.canvas.clientHeight / 2 + ((minY + maxY) / 2) * scale; draw();
 }
 function centerOn(x, y) { state.view.offsetX = els.canvas.clientWidth / 2 - x * state.view.scale; state.view.offsetY = els.canvas.clientHeight / 2 + y * state.view.scale; draw(); }
+function fitLands(lands, paddingWorld = 1.2) {
+  if (!lands?.length || !els.canvas.clientWidth || !els.canvas.clientHeight) return;
+  const xs = lands.map((land) => Number(land.centerX)).filter(Number.isFinite);
+  const ys = lands.map((land) => Number(land.centerY)).filter(Number.isFinite);
+  if (!xs.length || !ys.length) return;
+  let minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  if (minX === maxX) { minX -= 0.5; maxX += 0.5; }
+  if (minY === maxY) { minY -= 0.5; maxY += 0.5; }
+  minX -= paddingWorld; maxX += paddingWorld; minY -= paddingWorld; maxY += paddingWorld;
+  const pad = 42; const width = Math.max(0.4, maxX - minX); const height = Math.max(0.4, maxY - minY);
+  state.view.scale = Math.max(0.25, Math.min(450, (els.canvas.clientWidth - pad * 2) / width, (els.canvas.clientHeight - pad * 2) / height));
+  state.view.offsetX = els.canvas.clientWidth / 2 - ((minX + maxX) / 2) * state.view.scale;
+  state.view.offsetY = els.canvas.clientHeight / 2 + ((minY + maxY) / 2) * state.view.scale;
+  draw();
+}
+function fitDuplicateGroup() {
+  const lands = selectedDuplicateLands();
+  if (!lands.length) return toast('ยังไม่ได้เลือกชื่อ CAD ซ้ำ');
+  fitLands(lands, 1.6);
+}
 function zoomAt(factor, screenX = els.canvas.clientWidth / 2, screenY = els.canvas.clientHeight / 2) {
   const world = screenToWorld(screenX, screenY); const newScale = Math.min(450, Math.max(0.25, state.view.scale * factor)); state.view.scale = newScale; state.view.offsetX = screenX - world.x * newScale; state.view.offsetY = screenY + world.y * newScale; draw();
 }
@@ -710,25 +812,40 @@ function draw() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = '#090f19'; ctx.fillRect(0, 0, width, height); drawGrid(width, height);
   const component = currentComponent();
   if (!component) { els.viewerTitle.textContent = 'ไม่มีข้อมูล'; els.viewerSubtitle.textContent = 'นำเข้าไฟล์เพื่อแสดงตำแหน่ง Land'; return; }
-  els.viewerTitle.textContent = `${component.name} · ${component.packageName || 'Unknown package'}`; els.viewerSubtitle.textContent = `${formatInt.format(component.lands.length)} lands · scale ${state.view.scale.toFixed(1)} px/mm${state.preview ? ' · Preview active' : ''}`;
+  const duplicateGroups = duplicateGroupsForComponent(component); const duplicateLandCount = [...duplicateGroups.values()].reduce((sum, lands) => sum + lands.length, 0);
+  els.viewerTitle.textContent = `${component.name} · ${component.packageName || 'Unknown package'}`; els.viewerSubtitle.textContent = `${formatInt.format(component.lands.length)} lands · ชื่อซ้ำ ${formatInt.format(duplicateGroups.size)} กลุ่ม / ${formatInt.format(duplicateLandCount)} จุด · scale ${state.view.scale.toFixed(1)} px/mm${state.preview ? ' · Preview active' : ''}`;
   const byGlobal = mappingByGlobalId(); const previewByGlobal = previewStatusByGlobalId(); const current = currentMappings(); const measurements = current.map((m) => Number(m.measurement)).filter(Number.isFinite); const minMeasurement = measurements.length ? Math.min(...measurements) : 0; const maxMeasurement = measurements.length ? Math.max(...measurements) : 1;
   const histogramFilterActive = Boolean(state.histogram.filterEnabled && measurements.length);
   const histogramFilterMin = state.histogram.rangeMin == null ? minMeasurement : Number(state.histogram.rangeMin);
   const histogramFilterMax = state.histogram.rangeMax == null ? maxMeasurement : Number(state.histogram.rangeMax);
   if (component.bounds) { const p1 = worldToScreen(component.bounds.minX - 1, component.bounds.maxY + 1); const p2 = worldToScreen(component.bounds.maxX + 1, component.bounds.minY - 1); ctx.strokeStyle = 'rgba(86,214,197,.28)'; ctx.lineWidth = 1; ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y); }
   const showLabels = els.labelToggle.checked && state.view.scale >= 28; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.font = '9px ui-monospace, monospace';
+  const duplicateEnabled = state.duplicateView.enabled && duplicateGroups.size > 0;
+  const selectedDuplicateGroup = duplicateEnabled ? (duplicateGroups.get(state.duplicateView.selectedName) || []) : [];
+  if (selectedDuplicateGroup.length > 1) {
+    const points = selectedDuplicateGroup.map((land) => worldToScreen(land.centerX, land.centerY)).filter((p) => p.x > -100 && p.x < width + 100 && p.y > -100 && p.y < height + 100);
+    if (points.length > 1) { ctx.save(); ctx.setLineDash([6, 5]); ctx.strokeStyle = 'rgba(255,209,102,.72)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y); for (const point of points.slice(1)) ctx.lineTo(point.x, point.y); ctx.stroke(); ctx.restore(); }
+  }
   for (const land of component.lands) {
     const p = worldToScreen(land.centerX, land.centerY); if (p.x < -15 || p.x > width + 15 || p.y < -15 || p.y > height + 15) continue;
     const mapping = byGlobal.get(Number(land.globalId)); const previewStatus = previewByGlobal.get(Number(land.globalId)); const radius = Math.max(1.1, Math.min(8, (land.width || 0.5) * state.view.scale * 0.42));
+    const duplicateGroup = duplicateGroups.get(String(land.cadName || '').trim()); const isDuplicate = Boolean(duplicateGroup); const isSelectedDuplicate = isDuplicate && String(land.cadName || '').trim() === state.duplicateView.selectedName;
     const measurement = Number(mapping?.measurement);
     const insideHistogramRange = !histogramFilterActive || (Number.isFinite(measurement) && measurement >= histogramFilterMin && measurement <= histogramFilterMax);
-    ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.fillStyle = measurementColor(mapping, minMeasurement, maxMeasurement); ctx.globalAlpha = histogramFilterActive ? (insideHistogramRange ? (mapping ? 0.96 : 0.28) : 0.07) : (mapping ? 0.9 : 0.48); ctx.fill(); ctx.globalAlpha = 1;
+    let landAlpha = histogramFilterActive ? (insideHistogramRange ? (mapping ? 0.96 : 0.28) : 0.07) : (mapping ? 0.9 : 0.48);
+    if (duplicateEnabled && state.duplicateView.dimOthers && !isDuplicate) landAlpha *= 0.1;
+    ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.fillStyle = measurementColor(mapping, minMeasurement, maxMeasurement); ctx.globalAlpha = landAlpha; ctx.fill(); ctx.globalAlpha = 1;
     if (histogramFilterActive && insideHistogramRange && mapping) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, radius + 1), 0, Math.PI * 2); ctx.strokeStyle = 'rgba(86,214,197,.72)'; ctx.lineWidth = 0.9; ctx.stroke(); }
     if (previewStatus) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2.5, radius + 1.5), 0, Math.PI * 2); ctx.strokeStyle = ['conflict', 'anchor-conflict', 'out-of-range'].includes(previewStatus) ? '#ff6b75' : '#2ba7ff'; ctx.globalAlpha = 0.72; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1; }
     if (mapping?.anchorLocked) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(3.5, radius + 2.5), 0, Math.PI * 2); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.8; ctx.stroke(); }
     else if (mapping?.manual) { ctx.strokeStyle = '#9d7cff'; ctx.lineWidth = 1.3; ctx.stroke(); }
+    if (duplicateEnabled && isDuplicate) {
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(4, radius + (isSelectedDuplicate ? 5 : 2.5)), 0, Math.PI * 2);
+      ctx.strokeStyle = isSelectedDuplicate ? '#ffd166' : '#ff5bd3'; ctx.lineWidth = isSelectedDuplicate ? 2.4 : 1.35; ctx.stroke();
+      if (!isSelectedDuplicate) { ctx.beginPath(); ctx.moveTo(p.x - 2.5, p.y - 2.5); ctx.lineTo(p.x + 2.5, p.y + 2.5); ctx.moveTo(p.x + 2.5, p.y - 2.5); ctx.lineTo(p.x - 2.5, p.y + 2.5); ctx.strokeStyle = '#ffb3eb'; ctx.lineWidth = 1; ctx.stroke(); }
+    }
     if (state.selected && Number(state.selected.globalId) === Number(land.globalId)) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(5, radius + 4), 0, Math.PI * 2); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke(); }
-    if (showLabels && radius > 3) { ctx.fillStyle = '#d9e5f5'; ctx.fillText(land.cadName, p.x, p.y - radius - 2); }
+    if ((showLabels && radius > 3) || (duplicateEnabled && isSelectedDuplicate)) { ctx.fillStyle = isSelectedDuplicate ? '#ffe39a' : '#d9e5f5'; ctx.fillText(land.cadName, p.x, p.y - Math.max(radius, 4) - (isSelectedDuplicate ? 5 : 2)); }
   }
 }
 function findNearestLand(screenX, screenY) {
@@ -739,7 +856,8 @@ function findNearestLand(screenX, screenY) {
 function showTooltip(event, land) {
   if (!land) { els.tooltip.classList.add('hidden'); return; }
   const mapping = mappingByGlobalId().get(Number(land.globalId)); const preview = state.preview?.lookup?.get(Number(land.globalId));
-  els.tooltip.innerHTML = `<strong>${mapping?.alias || land.cadName}</strong><br>X-ray: ${mapping?.localIndex ?? '—'}<br>XML ID: ${land.globalId}<br>X: ${formatFloat.format(land.centerX)} · Y: ${formatFloat.format(land.centerY)}${mapping ? `<br>Measurement: ${mapping.measurement ?? '—'}` : ''}${preview ? `<br>Preview: X-ray ${preview.localIndex} · ${preview.status}` : ''}`;
+  const duplicateCount = duplicateGroupsForComponent().get(String(land.cadName || '').trim())?.length || 1;
+  els.tooltip.innerHTML = `<strong>${mapping?.alias || land.cadName}</strong><br>X-ray: ${mapping?.localIndex ?? '—'}<br>XML ID: ${land.globalId}<br>X: ${formatFloat.format(land.centerX)} · Y: ${formatFloat.format(land.centerY)}${mapping ? `<br>Measurement: ${mapping.measurement ?? '—'}` : ''}${duplicateCount > 1 ? `<br><b>ชื่อซ้ำ ${duplicateCount} ตำแหน่ง</b>` : ''}${preview ? `<br>Preview: X-ray ${preview.localIndex} · ${preview.status}` : ''}`;
   const rect = els.canvas.getBoundingClientRect(); els.tooltip.style.left = `${Math.min(rect.width - 190, event.clientX - rect.left + 13)}px`; els.tooltip.style.top = `${Math.min(rect.height - 125, event.clientY - rect.top + 13)}px`; els.tooltip.classList.remove('hidden');
 }
 function directRemap(mapping, land, label = 'Manual remap') {
@@ -776,11 +894,19 @@ function nudgeSelected(delta) {
 function search() {
   const query = els.searchInput.value.trim(); if (!query) return; const mappings = state.mappingData?.mappings || []; const number = Number(query); let matches = [];
   if (Number.isInteger(number)) { matches = currentMappings().filter((m) => Number(m.localIndex) === number); if (!matches.length) matches = mappings.filter((m) => Number(m.globalId) === number); }
-  if (!matches.length) { const lower = query.toLowerCase(); matches = mappings.filter((m) => String(m.cadName).toLowerCase() === lower || String(m.alias || '').toLowerCase() === lower); }
-  if (!matches.length && state.xmlData) {
-    for (const component of state.xmlData.components) for (const land of component.lands) if (String(land.cadName).toLowerCase() === query.toLowerCase() || Number(land.globalId) === number) { state.selectedComponentId = component.id; els.componentSelect.value = component.id; fitView(); selectLand(land); toast('พบใน XML แต่ไม่มีแถว X-ray ที่จับคู่'); return; }
+  if (!matches.length) {
+    const lower = query.toLowerCase();
+    matches = currentMappings().filter((m) => String(m.cadName).toLowerCase() === lower || String(m.alias || '').toLowerCase() === lower);
+    if (!matches.length) matches = mappings.filter((m) => String(m.cadName).toLowerCase() === lower || String(m.alias || '').toLowerCase() === lower);
   }
-  if (!matches.length) return toast(`ไม่พบ ${query}`); selectMapping(matches[0], true); if (matches.length > 1) toast(`พบ ${matches.length} ตำแหน่ง เลือกตำแหน่งแรกและแสดงคำเตือนชื่อซ้ำ`);
+  if (!matches.length && state.xmlData) {
+    for (const component of state.xmlData.components) for (const land of component.lands) if (String(land.cadName).toLowerCase() === query.toLowerCase() || Number(land.globalId) === number) { state.selectedComponentId = component.id; els.componentSelect.value = component.id; state.duplicateView.selectedName = ''; refreshDuplicateControls(); fitView(); selectLand(land); if (duplicateCountForLand(land) > 1) setSelectedDuplicateName(String(land.cadName).trim(), { fit: true }); toast('พบใน XML แต่ไม่มีแถว X-ray ที่จับคู่'); return; }
+  }
+  if (!matches.length) return toast(`ไม่พบ ${query}`);
+  selectMapping(matches[0], true);
+  const name = String(matches[0].cadName || '').trim(); const duplicateLands = duplicateGroupsForComponent().get(name) || [];
+  if (duplicateLands.length > 1) { setSelectedDuplicateName(name, { fit: true }); toast(`ชื่อ ${name} ซ้ำ ${duplicateLands.length} ตำแหน่ง และแสดงครบทุกจุดบนกราฟิก`); }
+  else if (matches.length > 1) toast(`พบ ${matches.length} ตำแหน่ง เลือกตำแหน่งแรก`);
 }
 function openTeachPanel() { if (!state.mappingData) return; els.teachOverlay.classList.remove('hidden'); renderTeachPanel(); }
 function closeTeachPanel() { els.teachOverlay.classList.add('hidden'); }
@@ -852,12 +978,12 @@ function unmapRange() {
 function exportCsv() {
   const mappings = state.mappingData?.mappings || []; const headers = ['xray_local_land','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row']; const lines = [headers.join(',')];
   for (const m of mappings) lines.push([m.localIndex, m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.confidence, m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
-  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.4.0.csv`);
+  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.5.0.csv`);
 }
 function exportJson() {
-  const payload = { app: 'BGA Land Mapper', version: '0.4.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries,
+  const payload = { app: 'BGA Land Mapper', version: '0.5.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries,
     overrides: (state.mappingData?.mappings || []).filter((m) => m.manual || m.alias || m.anchorLocked || !m.mapped).map((m) => ({ sourceRow: m.sourceRow, localIndex: m.localIndex, componentName: m.componentName, componentId: m.componentId, globalId: m.globalId, cadName: m.cadName, alias: m.alias || '', manual: Boolean(m.manual), mapped: Boolean(m.mapped), anchorLocked: Boolean(m.anchorLocked), confidence: m.confidence, mappingMethod: m.mappingMethod })) };
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.4.0.json');
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.5.0.json');
 }
 async function restoreBackup(file) {
   if (!file || !state.mappingData || !state.xmlData) return;
@@ -887,7 +1013,7 @@ els.dropZone.addEventListener('drop', (event) => { event.preventDefault(); els.d
 els.restoreButton.addEventListener('click', () => els.restoreFile.click());
 els.restoreFile.addEventListener('change', (event) => restoreBackup(event.target.files[0]));
 els.resetButton.addEventListener('click', resetProject); els.remapButton.addEventListener('click', runMapping);
-els.componentSelect.addEventListener('change', () => { state.selectedComponentId = els.componentSelect.value; state.selected = null; state.preview = null; state.page = 1; resetHistogramState(); clearDetails(); updateStats(); renderTable(); renderTeachPanel(); fitView(); renderHistogram(); renderDetailedHistogram(); });
+els.componentSelect.addEventListener('change', () => { state.selectedComponentId = els.componentSelect.value; state.selected = null; state.preview = null; state.page = 1; state.duplicateView.selectedName = ''; resetHistogramState(); clearDetails(); refreshDuplicateControls(); updateStats(); renderTable(); renderTeachPanel(); fitView(); renderHistogram(); renderDetailedHistogram(); });
 els.histogramBins.addEventListener('change', renderHistogram);
 els.expandHistogramButton.addEventListener('click', openDetailedHistogram);
 els.measurementHistogram.addEventListener('click', openDetailedHistogram);
@@ -933,7 +1059,13 @@ els.detailedHistogramCanvas.addEventListener('wheel', (event) => {
   if (min < layout.fullMin) { max += layout.fullMin - min; min = layout.fullMin; } if (max > layout.fullMax) { min -= max - layout.fullMax; max = layout.fullMax; }
   setHistogramRange(min, max);
 }, { passive: false });
-els.heatmapToggle.addEventListener('change', draw); els.labelToggle.addEventListener('change', draw); els.fitButton.addEventListener('click', fitView); els.zoomInButton.addEventListener('click', () => zoomAt(1.3)); els.zoomOutButton.addEventListener('click', () => zoomAt(1 / 1.3));
+els.heatmapToggle.addEventListener('change', draw); els.labelToggle.addEventListener('change', draw);
+els.duplicateToggle.addEventListener('change', () => { state.duplicateView.enabled = els.duplicateToggle.checked; els.duplicateOnlyToggle.disabled = !state.duplicateView.enabled || duplicateGroupsForComponent().size === 0; draw(); });
+els.duplicateOnlyToggle.addEventListener('change', () => { state.duplicateView.dimOthers = els.duplicateOnlyToggle.checked; draw(); });
+els.duplicateNameSelect.addEventListener('change', () => setSelectedDuplicateName(els.duplicateNameSelect.value, { fit: Boolean(els.duplicateNameSelect.value) }));
+els.fitDuplicateButton.addEventListener('click', fitDuplicateGroup);
+els.clearDuplicateButton.addEventListener('click', () => setSelectedDuplicateName(''));
+els.fitButton.addEventListener('click', fitView); els.zoomInButton.addEventListener('click', () => zoomAt(1.3)); els.zoomOutButton.addEventListener('click', () => zoomAt(1 / 1.3));
 els.searchButton.addEventListener('click', search); els.searchInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') search(); });
 els.tableFilter.addEventListener('change', () => { state.filter = els.tableFilter.value; state.page = 1; renderTable(); }); els.prevPage.addEventListener('click', () => { state.page -= 1; renderTable(); }); els.nextPage.addEventListener('click', () => { state.page += 1; renderTable(); });
 els.exportCsvButton.addEventListener('click', exportCsv); els.exportJsonButton.addEventListener('click', exportJson);

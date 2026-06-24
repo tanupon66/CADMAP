@@ -229,3 +229,19 @@ tbody tr.preview-row { background: rgba(43,167,255,.06); }
   .histogram-canvas-wrap { min-height: 440px; }
   .histogram-detail-sidebar { overflow: visible; }
 }
+
+/* v0.5.0 Duplicate CAD name visualization */
+.dot.duplicate { background: #ff5bd3; box-shadow: 0 0 0 2px rgba(255,91,211,.22); }
+.duplicate-toggle { background: rgba(255,91,211,.035); }
+.duplicate-summary-mini { margin-top: 7px; padding: 8px 9px; border: 1px solid rgba(255,91,211,.18); border-radius: 9px; background: rgba(255,91,211,.035); color: var(--muted); font-size: 9px; line-height: 1.45; }
+.duplicate-panel { background: linear-gradient(180deg, rgba(255,91,211,.035), rgba(255,255,255,.008)); }
+.duplicate-count-badge { min-width: 34px; padding: 5px 8px; border: 1px solid rgba(255,91,211,.3); border-radius: 999px; background: rgba(255,91,211,.08); color: #ffd0f2; text-align: center; font-size: 11px; }
+.duplicate-position-list { max-height: 250px; overflow: auto; margin-top: 9px; border: 1px solid var(--line-soft); border-radius: 10px; background: rgba(0,0,0,.08); }
+.duplicate-position-item { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 9px 10px; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; background: transparent; text-align: left; color: var(--text); }
+.duplicate-position-item:last-child { border-bottom: 0; }
+.duplicate-position-item:hover, .duplicate-position-item.active { background: rgba(255,91,211,.08); }
+.duplicate-position-item strong { display: block; font-size: 11px; }
+.duplicate-position-item span { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+.duplicate-position-index { min-width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid rgba(255,91,211,.28); border-radius: 50%; color: #ffd0f2; font-size: 9px; }
+.duplicate-panel-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 8px; }
+.duplicate-panel-actions button { font-size: 10px; }
