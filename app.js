@@ -33,8 +33,16 @@ const els = {
   tableFilter: $('tableFilter'), mappingTableBody: $('mappingTableBody'), tableSummary: $('tableSummary'), prevPage: $('prevPage'), nextPage: $('nextPage'), pageLabel: $('pageLabel'),
   selectedTitle: $('selectedTitle'), selectedSubTitle: $('selectedSubTitle'), dLocal: $('dLocal'), dGlobal: $('dGlobal'), dCad: $('dCad'), dComponent: $('dComponent'),
   dX: $('dX'), dY: $('dY'), dMeasurement: $('dMeasurement'), dConfidence: $('dConfidence'), dRow: $('dRow'), dMethod: $('dMethod'), dAnchor: $('dAnchor'),
-  measurementHistogram: $('measurementHistogram'), histogramBins: $('histogramBins'), histogramMessage: $('histogramMessage'),
+  measurementHistogram: $('measurementHistogram'), histogramBins: $('histogramBins'), histogramMessage: $('histogramMessage'), expandHistogramButton: $('expandHistogramButton'),
   histCount: $('histCount'), histMin: $('histMin'), histAverage: $('histAverage'), histMedian: $('histMedian'), histMax: $('histMax'),
+  histogramOverlay: $('histogramOverlay'), closeHistogramButton: $('closeHistogramButton'), detailedHistogramPart: $('detailedHistogramPart'),
+  detailedHistogramCanvas: $('detailedHistogramCanvas'), detailedHistogramBins: $('detailedHistogramBins'), histogramYMode: $('histogramYMode'),
+  histogramRangeMin: $('histogramRangeMin'), histogramRangeMax: $('histogramRangeMax'), applyHistogramRangeButton: $('applyHistogramRangeButton'),
+  resetHistogramRangeButton: $('resetHistogramRangeButton'), zoomHistogramBinButton: $('zoomHistogramBinButton'), exportHistogramButton: $('exportHistogramButton'),
+  histogramTooltip: $('histogramTooltip'), histogramSelectionLabel: $('histogramSelectionLabel'), histogramCadFilter: $('histogramCadFilter'), detailedHistogramMessage: $('detailedHistogramMessage'),
+  detailHistTotal: $('detailHistTotal'), detailHistInRange: $('detailHistInRange'), detailHistMin: $('detailHistMin'), detailHistQ1: $('detailHistQ1'),
+  detailHistAverage: $('detailHistAverage'), detailHistMedian: $('detailHistMedian'), detailHistQ3: $('detailHistQ3'), detailHistMax: $('detailHistMax'), detailHistStdDev: $('detailHistStdDev'),
+  selectedBinRange: $('selectedBinRange'), selectedBinCount: $('selectedBinCount'), selectedBinPercent: $('selectedBinPercent'), selectedBinCumulative: $('selectedBinCumulative'),
   anchorButton: $('anchorButton'), unmapButton: $('unmapButton'), nudgePrevButton: $('nudgePrevButton'), nudgeNextButton: $('nudgeNextButton'),
   aliasInput: $('aliasInput'), saveAliasButton: $('saveAliasButton'), duplicateWarning: $('duplicateWarning'), rawData: $('rawData'), copyRawButton: $('copyRawButton'),
   teachOverlay: $('teachOverlay'), closeTeachButton: $('closeTeachButton'), teachComponentLabel: $('teachComponentLabel'),
@@ -53,10 +61,12 @@ const state = {
   undoStack: [], redoStack: [], page: 1, pageSize: 80, filter: 'all',
   view: { scale: 1, offsetX: 0, offsetY: 0 }, dragging: false, lastPointer: null, dragStart: null,
   fileNames: { xml: '', xlsx: '' }, installPrompt: null,
+  histogram: { rangeMin: null, rangeMax: null, selectedBin: null, hoveredBin: null, layout: null, drag: null, filterEnabled: false },
 };
 
 const ctx = els.canvas.getContext('2d', { alpha: false });
 const histogramCtx = els.measurementHistogram.getContext('2d');
+const detailedHistogramCtx = els.detailedHistogramCanvas.getContext('2d');
 const formatInt = new Intl.NumberFormat('th-TH');
 const formatFloat = new Intl.NumberFormat('th-TH', { maximumFractionDigits: 4 });
 
@@ -236,7 +246,7 @@ function runMapping() {
   if (!state.xmlData || !state.xlsxData) return;
   const hasManual = state.mappingData?.mappings.some((m) => m.manual || m.anchorLocked);
   if (hasManual && !window.confirm('คำนวณ Mapping ใหม่จะล้าง Manual mapping และ Anchor ทั้งหมด ต้องการดำเนินการต่อหรือไม่?')) return;
-  state.schema = readSchemaControls(); state.mappingData = buildMappings(state.xmlData, state.xlsxData, state.schema); normalizeMappings();
+  state.schema = readSchemaControls(); state.mappingData = buildMappings(state.xmlData, state.xlsxData, state.schema); normalizeMappings(); resetHistogramState();
   state.undoStack = []; state.redoStack = []; state.preview = null;
   const firstMapped = state.mappingData.mappings.find((mapping) => mapping.mapped);
   populateComponents(firstMapped?.componentId || state.selectedComponentId); state.page = 1;
@@ -254,7 +264,7 @@ async function processFile(file) {
     if (state.xmlData && state.xlsxData) {
       els.importMessage.textContent = 'กำลังตรวจหาคอลัมน์และสร้าง Mapping…'; await nextFrame();
       state.schema = autoDetectSchema(state.xlsxData.activeSheet.rows, state.xmlData); populateSchemaControls();
-      state.mappingData = buildMappings(state.xmlData, state.xlsxData, state.schema); normalizeMappings(); state.undoStack = []; state.redoStack = []; state.preview = null;
+      state.mappingData = buildMappings(state.xmlData, state.xlsxData, state.schema); normalizeMappings(); resetHistogramState(); state.undoStack = []; state.redoStack = []; state.preview = null;
       const firstMapped = state.mappingData.mappings.find((mapping) => mapping.mapped); populateComponents(firstMapped?.componentId); renderTable();
       const summaries = state.mappingData.componentSummaries;
       const matchedParts = summaries.filter((summary) => summary.matched).length;
@@ -268,6 +278,7 @@ async function processFile(file) {
 }
 function resetProject() {
   Object.assign(state, { xmlText: null, xlsxBuffer: null, xmlData: null, xlsxData: null, schema: null, mappingData: null, selectedComponentId: null, selected: null, hoveredLand: null, manualMode: false, preview: null, undoStack: [], redoStack: [], page: 1, fileNames: { xml: '', xlsx: '' }, view: { scale: 1, offsetX: 0, offsetY: 0 }, dragStart: null });
+  resetHistogramState(); els.histogramOverlay.classList.add('hidden');
   els.xmlFileName.textContent = '—'; els.xlsxFileName.textContent = '—'; els.importMessage.textContent = 'ไฟล์จะถูกประมวลผลในเครื่อง ไม่อัปโหลดไปยังเซิร์ฟเวอร์';
   for (const select of [els.componentColumn, els.packageColumn, els.landColumn, els.measurementColumn, els.componentSelect]) select.innerHTML = '';
   els.mappingTableBody.innerHTML = ''; els.teachOverlay.classList.add('hidden'); clearDetails(); renderTeachPanel(); updateStats(); draw(); renderHistogram();
@@ -360,6 +371,7 @@ function renderHistogram() {
     for (const el of [els.histMin, els.histAverage, els.histMedian, els.histMax]) el.textContent = '—';
     els.histogramMessage.textContent = component ? `${component.name}: ไม่พบ Measurement ที่เป็นตัวเลขในข้อมูลดิบ` : 'เลือก Part ที่พบในข้อมูลดิบเพื่อแสดง Histogram';
     hctx.fillStyle = '#91a0b7'; hctx.font = '11px system-ui'; hctx.textAlign = 'center'; hctx.textBaseline = 'middle'; hctx.fillText('No numeric measurement data', width / 2, height / 2);
+    if (!els.histogramOverlay.classList.contains('hidden')) renderDetailedHistogram();
     return;
   }
 
@@ -414,7 +426,270 @@ function renderHistogram() {
 
   const binWidth = binCount === 1 ? 0 : span / binCount;
   els.histogramMessage.textContent = `${component?.name || 'Part'} · ${formatInt.format(values.length)} ค่า · ${binCount} bins${binWidth ? ` · bin width ${display(binWidth)}` : ''}`;
+  if (!els.histogramOverlay.classList.contains('hidden')) renderDetailedHistogram();
 }
+
+function measurementValues() {
+  return currentMappings().map((mapping) => Number(mapping.measurement)).filter(Number.isFinite).sort((a, b) => a - b);
+}
+function quantile(sortedValues, q) {
+  if (!sortedValues.length) return NaN;
+  if (sortedValues.length === 1) return sortedValues[0];
+  const position = (sortedValues.length - 1) * q;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  const weight = position - lower;
+  return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
+}
+function histogramStats(sortedValues) {
+  if (!sortedValues.length) return null;
+  const average = sortedValues.reduce((sum, value) => sum + value, 0) / sortedValues.length;
+  const variance = sortedValues.reduce((sum, value) => sum + ((value - average) ** 2), 0) / sortedValues.length;
+  return {
+    count: sortedValues.length,
+    min: sortedValues[0],
+    q1: quantile(sortedValues, 0.25),
+    average,
+    median: quantile(sortedValues, 0.5),
+    q3: quantile(sortedValues, 0.75),
+    max: sortedValues[sortedValues.length - 1],
+    stdDev: Math.sqrt(variance),
+  };
+}
+function clampHistogramRange(fullMin, fullMax, requestedMin, requestedMax) {
+  let min = Number.isFinite(requestedMin) ? requestedMin : fullMin;
+  let max = Number.isFinite(requestedMax) ? requestedMax : fullMax;
+  min = Math.max(fullMin, Math.min(fullMax, min));
+  max = Math.max(fullMin, Math.min(fullMax, max));
+  if (min > max) [min, max] = [max, min];
+  if (min === max && fullMin !== fullMax) {
+    const padding = Math.max((fullMax - fullMin) / 200, Number.EPSILON);
+    min = Math.max(fullMin, min - padding);
+    max = Math.min(fullMax, max + padding);
+  }
+  return { min, max };
+}
+function buildDetailedHistogramModel() {
+  const values = measurementValues();
+  if (!values.length) return { values, bins: [], inRange: [] };
+  const fullMin = values[0];
+  const fullMax = values[values.length - 1];
+  const requestedMin = state.histogram.rangeMin == null ? NaN : Number(state.histogram.rangeMin);
+  const requestedMax = state.histogram.rangeMax == null ? NaN : Number(state.histogram.rangeMax);
+  const active = clampHistogramRange(fullMin, fullMax, requestedMin, requestedMax);
+  const rangeMin = state.histogram.rangeMin == null ? fullMin : active.min;
+  const rangeMax = state.histogram.rangeMax == null ? fullMax : active.max;
+  const inRange = values.filter((value) => value >= rangeMin && value <= rangeMax);
+  const requestedBins = Math.max(5, Math.min(400, Number(els.detailedHistogramBins.value) || 50));
+  const binCount = rangeMax === rangeMin ? 1 : requestedBins;
+  const span = rangeMax - rangeMin || 1;
+  const bins = Array.from({ length: binCount }, (_, index) => {
+    const low = rangeMin + span * (index / binCount);
+    const high = index === binCount - 1 ? rangeMax : rangeMin + span * ((index + 1) / binCount);
+    return { index, low, high, count: 0, cumulative: 0 };
+  });
+  for (const value of inRange) {
+    const index = rangeMax === rangeMin ? 0 : Math.min(binCount - 1, Math.floor(((value - rangeMin) / span) * binCount));
+    bins[index].count += 1;
+  }
+  let cumulative = 0;
+  for (const bin of bins) { cumulative += bin.count; bin.cumulative = cumulative; }
+  return { values, fullMin, fullMax, rangeMin, rangeMax, span, inRange, bins, stats: histogramStats(inRange) };
+}
+function formatHistogramRange(low, high, isLast = false) {
+  return `${formatFloat.format(low)} ${isLast ? '≤ x ≤' : '≤ x <'} ${formatFloat.format(high)}`;
+}
+function updateSelectedBinDetails(model) {
+  const bin = model.bins?.[state.histogram.selectedBin];
+  els.zoomHistogramBinButton.disabled = !bin;
+  if (!bin) {
+    els.selectedBinRange.textContent = 'ยังไม่ได้เลือกแท่ง';
+    els.selectedBinCount.textContent = '—';
+    els.selectedBinPercent.textContent = '—';
+    els.selectedBinCumulative.textContent = '—';
+    return;
+  }
+  const denominator = model.inRange.length || 1;
+  els.selectedBinRange.textContent = formatHistogramRange(bin.low, bin.high, bin.index === model.bins.length - 1);
+  els.selectedBinCount.textContent = formatInt.format(bin.count);
+  els.selectedBinPercent.textContent = `${formatFloat.format((bin.count / denominator) * 100)}%`;
+  els.selectedBinCumulative.textContent = `${formatInt.format(bin.cumulative)} · ${formatFloat.format((bin.cumulative / denominator) * 100)}%`;
+}
+function renderDetailedHistogram() {
+  const canvas = els.detailedHistogramCanvas;
+  const hctx = detailedHistogramCtx;
+  if (!canvas || !hctx) return;
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const width = canvas.clientWidth || 920;
+  const height = canvas.clientHeight || 560;
+  const targetW = Math.round(width * dpr);
+  const targetH = Math.round(height * dpr);
+  if (canvas.width !== targetW || canvas.height !== targetH) { canvas.width = targetW; canvas.height = targetH; }
+  hctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  hctx.clearRect(0, 0, width, height);
+  hctx.fillStyle = '#0b1320';
+  hctx.fillRect(0, 0, width, height);
+
+  const component = currentComponent();
+  const model = buildDetailedHistogramModel();
+  els.detailedHistogramPart.textContent = component ? `${component.name} · ${component.packageName || 'Unknown package'} · Measurement ${formatInt.format(model.values.length)} ค่า` : 'เลือก Part เพื่อแสดงข้อมูล';
+  els.detailHistTotal.textContent = formatInt.format(model.values.length);
+  els.detailHistInRange.textContent = formatInt.format(model.inRange.length);
+  if (!model.values.length) {
+    for (const el of [els.detailHistMin, els.detailHistQ1, els.detailHistAverage, els.detailHistMedian, els.detailHistQ3, els.detailHistMax, els.detailHistStdDev]) el.textContent = '—';
+    els.detailedHistogramMessage.textContent = component ? `${component.name}: ไม่พบ Measurement ที่เป็นตัวเลข` : 'เลือก Part ที่พบในข้อมูลดิบ';
+    hctx.fillStyle = '#91a0b7'; hctx.font = '14px system-ui'; hctx.textAlign = 'center'; hctx.textBaseline = 'middle'; hctx.fillText('No numeric measurement data', width / 2, height / 2);
+    state.histogram.layout = null; updateSelectedBinDetails(model); return;
+  }
+
+  const stat = model.stats;
+  const display = (value) => Number.isFinite(value) ? formatFloat.format(value) : '—';
+  els.detailHistMin.textContent = display(stat?.min); els.detailHistQ1.textContent = display(stat?.q1); els.detailHistAverage.textContent = display(stat?.average);
+  els.detailHistMedian.textContent = display(stat?.median); els.detailHistQ3.textContent = display(stat?.q3); els.detailHistMax.textContent = display(stat?.max); els.detailHistStdDev.textContent = display(stat?.stdDev);
+  if (document.activeElement !== els.histogramRangeMin) els.histogramRangeMin.value = state.histogram.rangeMin == null ? '' : String(model.rangeMin);
+  if (document.activeElement !== els.histogramRangeMax) els.histogramRangeMax.value = state.histogram.rangeMax == null ? '' : String(model.rangeMax);
+
+  const margin = { left: 68, right: 26, top: 34, bottom: 58 };
+  const chartW = Math.max(1, width - margin.left - margin.right);
+  const chartH = Math.max(1, height - margin.top - margin.bottom);
+  const yMode = els.histogramYMode.value === 'percent' ? 'percent' : 'count';
+  const denominator = model.inRange.length || 1;
+  const barValues = model.bins.map((bin) => yMode === 'percent' ? (bin.count / denominator) * 100 : bin.count);
+  const peak = Math.max(...barValues, yMode === 'percent' ? 0.01 : 1);
+
+  hctx.strokeStyle = 'rgba(145,160,183,.18)'; hctx.lineWidth = 1;
+  hctx.fillStyle = '#91a0b7'; hctx.font = '10px system-ui';
+  for (let step = 0; step <= 5; step += 1) {
+    const ratio = step / 5;
+    const y = margin.top + chartH * ratio;
+    hctx.beginPath(); hctx.moveTo(margin.left, y); hctx.lineTo(width - margin.right, y); hctx.stroke();
+    const value = peak * (1 - ratio);
+    hctx.textAlign = 'right'; hctx.textBaseline = 'middle'; hctx.fillText(yMode === 'percent' ? `${formatFloat.format(value)}%` : formatInt.format(Math.round(value)), margin.left - 8, y);
+  }
+
+  const slot = chartW / model.bins.length;
+  const gap = Math.min(3, slot * 0.22);
+  model.bins.forEach((bin, index) => {
+    const value = barValues[index];
+    const barH = (value / peak) * chartH;
+    const ratio = model.bins.length === 1 ? 0.5 : index / (model.bins.length - 1);
+    hctx.fillStyle = `hsl(${210 - ratio * 190} 78% 58%)`;
+    hctx.globalAlpha = state.histogram.selectedBin == null || state.histogram.selectedBin === index ? 0.92 : 0.52;
+    hctx.fillRect(margin.left + index * slot + gap / 2, margin.top + chartH - barH, Math.max(1, slot - gap), barH);
+    hctx.globalAlpha = 1;
+    if (state.histogram.selectedBin === index || state.histogram.hoveredBin === index) {
+      hctx.strokeStyle = state.histogram.selectedBin === index ? '#ffffff' : '#56d6c5'; hctx.lineWidth = state.histogram.selectedBin === index ? 2 : 1.2;
+      hctx.strokeRect(margin.left + index * slot + gap / 2, margin.top + chartH - barH, Math.max(1, slot - gap), Math.max(1, barH));
+    }
+  });
+
+  hctx.fillStyle = '#91a0b7'; hctx.textBaseline = 'top';
+  const xTickCount = Math.min(8, Math.max(2, Math.floor(chartW / 115)));
+  for (let tick = 0; tick <= xTickCount; tick += 1) {
+    const ratio = tick / xTickCount;
+    const x = margin.left + chartW * ratio;
+    const value = model.rangeMin + model.span * ratio;
+    hctx.strokeStyle = 'rgba(145,160,183,.24)'; hctx.beginPath(); hctx.moveTo(x, margin.top + chartH); hctx.lineTo(x, margin.top + chartH + 5); hctx.stroke();
+    hctx.textAlign = tick === 0 ? 'left' : tick === xTickCount ? 'right' : 'center'; hctx.fillText(display(value), x, margin.top + chartH + 9);
+  }
+  hctx.textAlign = 'center'; hctx.fillText('Measurement', margin.left + chartW / 2, height - 17);
+
+  const selectedMeasurement = Number(state.selected?.measurement);
+  if (Number.isFinite(selectedMeasurement) && selectedMeasurement >= model.rangeMin && selectedMeasurement <= model.rangeMax && String(state.selected?.componentId) === String(state.selectedComponentId)) {
+    const ratio = model.rangeMax === model.rangeMin ? 0.5 : (selectedMeasurement - model.rangeMin) / model.span;
+    const x = margin.left + ratio * chartW;
+    hctx.strokeStyle = '#ffffff'; hctx.lineWidth = 1.5; hctx.setLineDash([5, 4]); hctx.beginPath(); hctx.moveTo(x, margin.top); hctx.lineTo(x, margin.top + chartH); hctx.stroke(); hctx.setLineDash([]);
+    hctx.fillStyle = '#ffffff'; hctx.textAlign = x > width * 0.75 ? 'right' : 'left'; hctx.textBaseline = 'top'; hctx.fillText(`Selected ${display(selectedMeasurement)}`, x + (x > width * 0.75 ? -6 : 6), margin.top + 4);
+  }
+
+  if (state.histogram.drag) {
+    const x1 = Math.max(margin.left, Math.min(margin.left + chartW, state.histogram.drag.startX));
+    const x2 = Math.max(margin.left, Math.min(margin.left + chartW, state.histogram.drag.currentX));
+    const left = Math.min(x1, x2); const selectionW = Math.abs(x2 - x1);
+    hctx.fillStyle = 'rgba(43,167,255,.16)'; hctx.fillRect(left, margin.top, selectionW, chartH);
+    hctx.strokeStyle = 'rgba(43,167,255,.9)'; hctx.lineWidth = 1; hctx.strokeRect(left, margin.top, selectionW, chartH);
+    const low = model.rangeMin + ((left - margin.left) / chartW) * model.span;
+    const high = model.rangeMin + (((left + selectionW) - margin.left) / chartW) * model.span;
+    els.histogramSelectionLabel.textContent = `${display(low)} – ${display(high)}`; els.histogramSelectionLabel.classList.remove('hidden');
+  } else els.histogramSelectionLabel.classList.add('hidden');
+
+  state.histogram.layout = { ...model, margin, chartW, chartH, slot, width, height, yMode, peak };
+  updateSelectedBinDetails(model);
+  const binWidth = model.bins.length === 1 ? 0 : model.span / model.bins.length;
+  els.detailedHistogramMessage.textContent = `${component?.name || 'Part'} · ช่วง ${display(model.rangeMin)} ถึง ${display(model.rangeMax)} · ${formatInt.format(model.inRange.length)} ค่า · ${model.bins.length} bins${binWidth ? ` · bin width ${display(binWidth)}` : ''}`;
+}
+function openDetailedHistogram() {
+  els.histogramOverlay.classList.remove('hidden');
+  requestAnimationFrame(() => { renderDetailedHistogram(); requestAnimationFrame(renderDetailedHistogram); });
+}
+function closeDetailedHistogram() {
+  els.histogramOverlay.classList.add('hidden');
+  els.histogramTooltip.classList.add('hidden');
+  state.histogram.drag = null; state.histogram.hoveredBin = null;
+}
+function detailedHistogramPoint(event) {
+  const rect = els.detailedHistogramCanvas.getBoundingClientRect();
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+}
+function histogramValueAtX(x, layout = state.histogram.layout) {
+  if (!layout) return NaN;
+  const ratio = Math.max(0, Math.min(1, (x - layout.margin.left) / layout.chartW));
+  return layout.rangeMin + ratio * layout.span;
+}
+function histogramBinAtPoint(point) {
+  const layout = state.histogram.layout;
+  if (!layout || point.x < layout.margin.left || point.x > layout.margin.left + layout.chartW || point.y < layout.margin.top || point.y > layout.margin.top + layout.chartH) return null;
+  return Math.max(0, Math.min(layout.bins.length - 1, Math.floor((point.x - layout.margin.left) / layout.slot)));
+}
+function showDetailedHistogramTooltip(event, binIndex) {
+  const layout = state.histogram.layout;
+  const bin = layout?.bins?.[binIndex];
+  if (!bin) { els.histogramTooltip.classList.add('hidden'); return; }
+  const denominator = layout.inRange.length || 1;
+  els.histogramTooltip.innerHTML = `<strong>${formatHistogramRange(bin.low, bin.high, bin.index === layout.bins.length - 1)}</strong><br>Count: ${formatInt.format(bin.count)}<br>Percent: ${formatFloat.format((bin.count / denominator) * 100)}%<br>Cumulative: ${formatInt.format(bin.cumulative)} (${formatFloat.format((bin.cumulative / denominator) * 100)}%)`;
+  const rect = els.detailedHistogramCanvas.getBoundingClientRect();
+  const wrapRect = els.detailedHistogramCanvas.parentElement.getBoundingClientRect();
+  let left = event.clientX - wrapRect.left + 14; let top = event.clientY - wrapRect.top + 14;
+  if (left + 250 > rect.width) left -= 265;
+  if (top + 110 > rect.height) top -= 120;
+  els.histogramTooltip.style.left = `${Math.max(6, left)}px`; els.histogramTooltip.style.top = `${Math.max(6, top)}px`; els.histogramTooltip.classList.remove('hidden');
+}
+function setHistogramRange(min, max) {
+  const values = measurementValues();
+  if (!values.length) return;
+  const range = clampHistogramRange(values[0], values[values.length - 1], Number(min), Number(max));
+  state.histogram.rangeMin = range.min; state.histogram.rangeMax = range.max; state.histogram.selectedBin = null; state.histogram.hoveredBin = null;
+  renderDetailedHistogram(); draw();
+}
+function applyHistogramRangeFromInputs() {
+  const values = measurementValues(); if (!values.length) return;
+  const min = els.histogramRangeMin.value === '' ? values[0] : Number(els.histogramRangeMin.value);
+  const max = els.histogramRangeMax.value === '' ? values[values.length - 1] : Number(els.histogramRangeMax.value);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) { toast('กรุณากรอกช่วง Measurement เป็นตัวเลข'); return; }
+  setHistogramRange(min, max);
+}
+function resetHistogramRange() {
+  state.histogram.rangeMin = null; state.histogram.rangeMax = null; state.histogram.selectedBin = null; state.histogram.hoveredBin = null; state.histogram.drag = null;
+  els.histogramRangeMin.value = ''; els.histogramRangeMax.value = ''; renderDetailedHistogram(); draw();
+}
+function zoomToSelectedHistogramBin() {
+  const layout = state.histogram.layout; const bin = layout?.bins?.[state.histogram.selectedBin]; if (!bin) return;
+  setHistogramRange(bin.low, bin.high);
+}
+function exportHistogramCsv() {
+  const model = buildDetailedHistogramModel(); if (!model.bins.length) { toast('ไม่มี Measurement สำหรับส่งออก'); return; }
+  const denominator = model.inRange.length || 1;
+  const rows = [['bin','lower_bound','upper_bound','count','percent','cumulative_count','cumulative_percent']];
+  for (const bin of model.bins) rows.push([bin.index + 1, bin.low, bin.high, bin.count, (bin.count / denominator) * 100, bin.cumulative, (bin.cumulative / denominator) * 100]);
+  const csv = rows.map((row) => row.map(escapeCsv).join(',')).join('\r\n');
+  const componentName = currentComponent()?.name || 'part';
+  downloadBlob(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' }), `${componentName}_measurement_histogram.csv`);
+}
+function resetHistogramState() {
+  state.histogram = { rangeMin: null, rangeMax: null, selectedBin: null, hoveredBin: null, layout: null, drag: null, filterEnabled: false };
+  if (els.histogramCadFilter) els.histogramCadFilter.checked = false;
+}
+
 function measurementColor(mapping, minMeasurement, maxMeasurement) {
   if (!mapping) return '#506078';
   if (els.heatmapToggle.checked && Number.isFinite(Number(mapping.measurement))) {
@@ -437,12 +712,18 @@ function draw() {
   if (!component) { els.viewerTitle.textContent = 'ไม่มีข้อมูล'; els.viewerSubtitle.textContent = 'นำเข้าไฟล์เพื่อแสดงตำแหน่ง Land'; return; }
   els.viewerTitle.textContent = `${component.name} · ${component.packageName || 'Unknown package'}`; els.viewerSubtitle.textContent = `${formatInt.format(component.lands.length)} lands · scale ${state.view.scale.toFixed(1)} px/mm${state.preview ? ' · Preview active' : ''}`;
   const byGlobal = mappingByGlobalId(); const previewByGlobal = previewStatusByGlobalId(); const current = currentMappings(); const measurements = current.map((m) => Number(m.measurement)).filter(Number.isFinite); const minMeasurement = measurements.length ? Math.min(...measurements) : 0; const maxMeasurement = measurements.length ? Math.max(...measurements) : 1;
+  const histogramFilterActive = Boolean(state.histogram.filterEnabled && measurements.length);
+  const histogramFilterMin = state.histogram.rangeMin == null ? minMeasurement : Number(state.histogram.rangeMin);
+  const histogramFilterMax = state.histogram.rangeMax == null ? maxMeasurement : Number(state.histogram.rangeMax);
   if (component.bounds) { const p1 = worldToScreen(component.bounds.minX - 1, component.bounds.maxY + 1); const p2 = worldToScreen(component.bounds.maxX + 1, component.bounds.minY - 1); ctx.strokeStyle = 'rgba(86,214,197,.28)'; ctx.lineWidth = 1; ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y); }
   const showLabels = els.labelToggle.checked && state.view.scale >= 28; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.font = '9px ui-monospace, monospace';
   for (const land of component.lands) {
     const p = worldToScreen(land.centerX, land.centerY); if (p.x < -15 || p.x > width + 15 || p.y < -15 || p.y > height + 15) continue;
     const mapping = byGlobal.get(Number(land.globalId)); const previewStatus = previewByGlobal.get(Number(land.globalId)); const radius = Math.max(1.1, Math.min(8, (land.width || 0.5) * state.view.scale * 0.42));
-    ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.fillStyle = measurementColor(mapping, minMeasurement, maxMeasurement); ctx.globalAlpha = mapping ? 0.9 : 0.48; ctx.fill(); ctx.globalAlpha = 1;
+    const measurement = Number(mapping?.measurement);
+    const insideHistogramRange = !histogramFilterActive || (Number.isFinite(measurement) && measurement >= histogramFilterMin && measurement <= histogramFilterMax);
+    ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.fillStyle = measurementColor(mapping, minMeasurement, maxMeasurement); ctx.globalAlpha = histogramFilterActive ? (insideHistogramRange ? (mapping ? 0.96 : 0.28) : 0.07) : (mapping ? 0.9 : 0.48); ctx.fill(); ctx.globalAlpha = 1;
+    if (histogramFilterActive && insideHistogramRange && mapping) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, radius + 1), 0, Math.PI * 2); ctx.strokeStyle = 'rgba(86,214,197,.72)'; ctx.lineWidth = 0.9; ctx.stroke(); }
     if (previewStatus) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2.5, radius + 1.5), 0, Math.PI * 2); ctx.strokeStyle = ['conflict', 'anchor-conflict', 'out-of-range'].includes(previewStatus) ? '#ff6b75' : '#2ba7ff'; ctx.globalAlpha = 0.72; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1; }
     if (mapping?.anchorLocked) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(3.5, radius + 2.5), 0, Math.PI * 2); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.8; ctx.stroke(); }
     else if (mapping?.manual) { ctx.strokeStyle = '#9d7cff'; ctx.lineWidth = 1.3; ctx.stroke(); }
@@ -571,12 +852,12 @@ function unmapRange() {
 function exportCsv() {
   const mappings = state.mappingData?.mappings || []; const headers = ['xray_local_land','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row']; const lines = [headers.join(',')];
   for (const m of mappings) lines.push([m.localIndex, m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.confidence, m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
-  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.3.0.csv`);
+  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.4.0.csv`);
 }
 function exportJson() {
-  const payload = { app: 'BGA Land Mapper', version: '0.3.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries,
+  const payload = { app: 'BGA Land Mapper', version: '0.4.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries,
     overrides: (state.mappingData?.mappings || []).filter((m) => m.manual || m.alias || m.anchorLocked || !m.mapped).map((m) => ({ sourceRow: m.sourceRow, localIndex: m.localIndex, componentName: m.componentName, componentId: m.componentId, globalId: m.globalId, cadName: m.cadName, alias: m.alias || '', manual: Boolean(m.manual), mapped: Boolean(m.mapped), anchorLocked: Boolean(m.anchorLocked), confidence: m.confidence, mappingMethod: m.mappingMethod })) };
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.3.0.json');
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.4.0.json');
 }
 async function restoreBackup(file) {
   if (!file || !state.mappingData || !state.xmlData) return;
@@ -597,7 +878,7 @@ async function restoreBackup(file) {
   } catch (error) { console.error(error); toast(`นำเข้า Backup ไม่สำเร็จ: ${error.message}`, 5200); }
   finally { els.restoreFile.value = ''; }
 }
-function resizeCanvas() { draw(); renderHistogram(); }
+function resizeCanvas() { draw(); renderHistogram(); if (!els.histogramOverlay.classList.contains('hidden')) renderDetailedHistogram(); }
 
 els.projectFile.addEventListener('change', (event) => processFile(event.target.files[0]));
 els.dropZone.addEventListener('dragover', (event) => { event.preventDefault(); els.dropZone.classList.add('drag'); });
@@ -606,8 +887,52 @@ els.dropZone.addEventListener('drop', (event) => { event.preventDefault(); els.d
 els.restoreButton.addEventListener('click', () => els.restoreFile.click());
 els.restoreFile.addEventListener('change', (event) => restoreBackup(event.target.files[0]));
 els.resetButton.addEventListener('click', resetProject); els.remapButton.addEventListener('click', runMapping);
-els.componentSelect.addEventListener('change', () => { state.selectedComponentId = els.componentSelect.value; state.selected = null; state.preview = null; state.page = 1; clearDetails(); updateStats(); renderTable(); renderTeachPanel(); fitView(); renderHistogram(); });
+els.componentSelect.addEventListener('change', () => { state.selectedComponentId = els.componentSelect.value; state.selected = null; state.preview = null; state.page = 1; resetHistogramState(); clearDetails(); updateStats(); renderTable(); renderTeachPanel(); fitView(); renderHistogram(); renderDetailedHistogram(); });
 els.histogramBins.addEventListener('change', renderHistogram);
+els.expandHistogramButton.addEventListener('click', openDetailedHistogram);
+els.measurementHistogram.addEventListener('click', openDetailedHistogram);
+els.closeHistogramButton.addEventListener('click', closeDetailedHistogram);
+els.histogramOverlay.addEventListener('click', (event) => { if (event.target === els.histogramOverlay) closeDetailedHistogram(); });
+els.detailedHistogramBins.addEventListener('change', () => { state.histogram.selectedBin = null; renderDetailedHistogram(); });
+els.histogramYMode.addEventListener('change', renderDetailedHistogram);
+els.applyHistogramRangeButton.addEventListener('click', applyHistogramRangeFromInputs);
+els.resetHistogramRangeButton.addEventListener('click', resetHistogramRange);
+els.zoomHistogramBinButton.addEventListener('click', zoomToSelectedHistogramBin);
+els.exportHistogramButton.addEventListener('click', exportHistogramCsv);
+els.histogramCadFilter.addEventListener('change', () => { state.histogram.filterEnabled = els.histogramCadFilter.checked; draw(); });
+els.detailedHistogramCanvas.addEventListener('pointerdown', (event) => {
+  const point = detailedHistogramPoint(event); const layout = state.histogram.layout;
+  if (!layout || point.x < layout.margin.left || point.x > layout.margin.left + layout.chartW || point.y < layout.margin.top || point.y > layout.margin.top + layout.chartH) return;
+  els.detailedHistogramCanvas.setPointerCapture(event.pointerId); state.histogram.drag = { startX: point.x, currentX: point.x, pointerId: event.pointerId };
+});
+els.detailedHistogramCanvas.addEventListener('pointermove', (event) => {
+  const point = detailedHistogramPoint(event);
+  if (state.histogram.drag) { state.histogram.drag.currentX = point.x; renderDetailedHistogram(); return; }
+  const binIndex = histogramBinAtPoint(point);
+  if (binIndex !== state.histogram.hoveredBin) { state.histogram.hoveredBin = binIndex; renderDetailedHistogram(); }
+  showDetailedHistogramTooltip(event, binIndex);
+});
+els.detailedHistogramCanvas.addEventListener('pointerup', (event) => {
+  const drag = state.histogram.drag; if (!drag) return;
+  const point = detailedHistogramPoint(event); state.histogram.drag = null; els.histogramSelectionLabel.classList.add('hidden');
+  if (Math.abs(point.x - drag.startX) < 5) {
+    const binIndex = histogramBinAtPoint(point); state.histogram.selectedBin = binIndex; renderDetailedHistogram(); showDetailedHistogramTooltip(event, binIndex); return;
+  }
+  const layout = state.histogram.layout; if (!layout) return;
+  const low = histogramValueAtX(Math.min(drag.startX, point.x), layout); const high = histogramValueAtX(Math.max(drag.startX, point.x), layout); setHistogramRange(low, high);
+});
+els.detailedHistogramCanvas.addEventListener('pointercancel', () => { state.histogram.drag = null; els.histogramSelectionLabel.classList.add('hidden'); renderDetailedHistogram(); });
+els.detailedHistogramCanvas.addEventListener('pointerleave', () => { if (!state.histogram.drag) { state.histogram.hoveredBin = null; els.histogramTooltip.classList.add('hidden'); renderDetailedHistogram(); } });
+els.detailedHistogramCanvas.addEventListener('wheel', (event) => {
+  event.preventDefault(); const layout = state.histogram.layout; if (!layout?.values?.length) return;
+  const point = detailedHistogramPoint(event); const ratio = Math.max(0, Math.min(1, (point.x - layout.margin.left) / layout.chartW));
+  const fullSpan = layout.fullMax - layout.fullMin || 1; const currentSpan = layout.rangeMax - layout.rangeMin || fullSpan;
+  let newSpan = currentSpan * (event.deltaY < 0 ? 0.72 : 1.38); newSpan = Math.max(fullSpan / 100000, Math.min(fullSpan, newSpan));
+  if (newSpan >= fullSpan * 0.999999) { resetHistogramRange(); return; }
+  const centerValue = layout.rangeMin + ratio * currentSpan; let min = centerValue - ratio * newSpan; let max = min + newSpan;
+  if (min < layout.fullMin) { max += layout.fullMin - min; min = layout.fullMin; } if (max > layout.fullMax) { min -= max - layout.fullMax; max = layout.fullMax; }
+  setHistogramRange(min, max);
+}, { passive: false });
 els.heatmapToggle.addEventListener('change', draw); els.labelToggle.addEventListener('change', draw); els.fitButton.addEventListener('click', fitView); els.zoomInButton.addEventListener('click', () => zoomAt(1.3)); els.zoomOutButton.addEventListener('click', () => zoomAt(1 / 1.3));
 els.searchButton.addEventListener('click', search); els.searchInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') search(); });
 els.tableFilter.addEventListener('change', () => { state.filter = els.tableFilter.value; state.page = 1; renderTable(); }); els.prevPage.addEventListener('click', () => { state.page -= 1; renderTable(); }); els.nextPage.addEventListener('click', () => { state.page += 1; renderTable(); });
@@ -625,11 +950,12 @@ els.canvas.addEventListener('pointerdown', (event) => { els.canvas.setPointerCap
 els.canvas.addEventListener('pointermove', (event) => { const point = getCanvasPoint(event); if (state.dragging && state.lastPointer) { state.view.offsetX += point.x - state.lastPointer.x; state.view.offsetY += point.y - state.lastPointer.y; state.lastPointer = point; draw(); els.tooltip.classList.add('hidden'); return; } state.hoveredLand = findNearestLand(point.x, point.y); showTooltip(event, state.hoveredLand); });
 els.canvas.addEventListener('pointerup', (event) => { const point = getCanvasPoint(event); const moved = state.dragStart ? Math.hypot(point.x - state.dragStart.x, point.y - state.dragStart.y) : 0; state.dragging = false; state.lastPointer = null; state.dragStart = null; if (moved < 4) selectLand(findNearestLand(point.x, point.y)); });
 els.canvas.addEventListener('pointercancel', () => { state.dragging = false; state.lastPointer = null; state.dragStart = null; }); els.canvas.addEventListener('pointerleave', () => els.tooltip.classList.add('hidden'));
-window.addEventListener('keydown', (event) => { const tag = document.activeElement?.tagName; if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) return; if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); } if (event.key === 'Escape') { state.manualMode = false; els.manualButton.textContent = 'เลือก CAD ใหม่'; els.manualBanner.classList.add('hidden'); closeTeachPanel(); } });
+window.addEventListener('keydown', (event) => { const tag = document.activeElement?.tagName; if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) return; if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); } if (event.key === 'Escape') { state.manualMode = false; els.manualButton.textContent = 'เลือก CAD ใหม่'; els.manualBanner.classList.add('hidden'); closeTeachPanel(); closeDetailedHistogram(); } });
 window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); state.installPrompt = event; els.installButton.classList.remove('hidden'); });
 els.installButton.addEventListener('click', async () => { if (!state.installPrompt) return; state.installPrompt.prompt(); await state.installPrompt.userChoice; state.installPrompt = null; els.installButton.classList.add('hidden'); });
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.warn));
 const resizeObserver = new ResizeObserver(resizeCanvas);
 resizeObserver.observe(els.canvas);
 resizeObserver.observe(els.measurementHistogram);
+resizeObserver.observe(els.detailedHistogramCanvas);
 resetProject();

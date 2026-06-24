@@ -1,44 +1,53 @@
-# BGA Land Mapper PWA v0.3.0
+# BGA Land Mapper PWA v0.4.0
 
-PWA สำหรับเปิด CAD XML และผลตรวจ X-ray XLSX, จับคู่หมายเลข Land และแสดงตำแหน่งบน Canvas โดยประมวลผลภายในเบราว์เซอร์
+PWA สำหรับเปิด CAD XML และผลตรวจ X-ray XLSX, จับคู่หมายเลข Land, แสดงตำแหน่งบน CAD และวิเคราะห์ Measurement โดยประมวลผลภายในเบราว์เซอร์
 
-## อัปเดต v0.3.0
+## อัปเดต v0.4.0 — Detailed Histogram
 
-- ตัดฟังก์ชัน Result Code ออกจาก UI, Auto Detect, สีบนกราฟิก, ตาราง, CSV และ Backup
-- เพิ่ม Measurement Histogram แยกตาม Part ที่กำลังเลือก
-- เลือกจำนวน Histogram bins ได้ 10, 20, 30 หรือ 50
-- แสดง Count, Min, Average, Median และ Max
-- แสดงเส้นตำแหน่ง Measurement ของ Land ที่เลือกอยู่บน Histogram
-- Heatmap บน CAD ใช้ค่า Measurement ต่ำ→สูงโดยตรง
-- รายการ Part สร้างจาก Component/Package ที่พบในข้อมูลดิบเท่านั้น
-- ถ้าข้อมูลดิบมีเพียง U1 โปรแกรมจะแสดงเฉพาะ U1 แม้ CAD จะมี Part อื่นอีกจำนวนมาก
-- รองรับข้อมูลดิบที่มีหลาย Part โดยสร้าง Mapping, Histogram และ Viewer แยกตามแต่ละ Part
-- แจ้ง Part ที่มีในข้อมูลดิบแต่ไม่พบใน CAD
+- เพิ่มปุ่มขยาย Histogram แบบเต็มหน้าจอ
+- รองรับ 10–200 bins ในหน้ารายละเอียด
+- สลับแกน Y ระหว่างจำนวน Land และเปอร์เซ็นต์
+- ซูมช่วง Measurement ด้วยล้อเมาส์
+- ลากบนกราฟเพื่อเลือกและขยายช่วงค่า
+- กรอกค่า Min/Max เพื่อดูช่วงที่กำหนดเอง
+- คลิกแท่งเพื่อดูช่วง, Count, Percent และ Cumulative
+- แสดง Total, In-range, Min, Q1, Average, Median, Q3, Max และ Standard deviation
+- แสดงเส้นตำแหน่ง Measurement ของ Land ที่เลือก
+- เน้นเฉพาะ Land ที่อยู่ในช่วง Histogram บน CAD ได้
+- Export ตาราง Histogram ปัจจุบันเป็น CSV
+- รองรับจอ Desktop, Tablet และ Mobile
 
-## Manual Teach
+## ฟังก์ชันเดิม
 
-- Manual remap: เลือก X-ray Land แล้วคลิก CAD Land ที่ถูกต้อง
-- Lock/Unlock Anchor เพื่อยืนยันจุดอ้างอิง
-- วิเคราะห์ Forward/Reverse และ Offset จาก Anchor
-- Preview ก่อน Apply พร้อม Confidence, Conflict และ Out of range
-- Shift, Nudge, Unmap ช่วง และ Undo/Redo
-- Import/Export Backup JSON สำหรับ Anchor, Manual mapping และหมายเหตุ
+- เปิด ZIP ที่มี CAD XML และ X-ray XLSX ได้โดยตรง
+- แสดงเฉพาะ Part ที่พบในข้อมูลดิบ เช่น ข้อมูลมีเพียง U1 จะแสดงเฉพาะ U1
+- รองรับหลาย Part ในข้อมูลดิบ โดยแยก Mapping, Viewer และ Histogram ตาม Part
+- Heatmap จาก Measurement
+- Manual remap, Anchor, Manual Teach, Pattern Preview, Shift และ Unmap
+- Undo/Redo
+- Export Mapping CSV และ Backup JSON
+- ทำงาน Offline หลังติดตั้ง PWA
 
-## วิธีใช้งาน
+## วิธีใช้ Histogram แบบละเอียด
 
-1. นำเข้า ZIP หรือ XML + XLSX
-2. ตรวจคอลัมน์ Component, Package, Land number และ Measurement
-3. เลือก Part ที่มาจากข้อมูลดิบในช่อง Component
-4. ดูตำแหน่ง CAD, Heatmap และ Histogram ของ Part นั้น
-5. ถ้า Mapping ไม่ถูก ให้ใช้ `เลือก CAD ใหม่` และ `Manual Teach`
-6. Export CSV หรือ Backup JSON
-
-ไฟล์ตัวอย่างยืนยัน `X-ray 17660 → CAD CU71 → XML ID 18572` และ Mapping อัตโนมัติ `17,662/17,662` จุด
+1. นำเข้าโปรเจกต์และเลือก Part
+2. กดปุ่ม `⛶` ข้าง Histogram หรือคลิกกราฟย่อ
+3. เลือกจำนวน Bins และรูปแบบแกน Y
+4. ใช้ล้อเมาส์เพื่อซูม หรือกดลากบนกราฟเพื่อเลือกช่วง
+5. คลิกแท่งเพื่อดูจำนวนและเปอร์เซ็นต์ของช่วงนั้น
+6. เปิด `เน้นเฉพาะ Measurement ในช่วงที่กำลังดูบน CAD` เพื่อเชื่อมผล Histogram กับตำแหน่ง Land
+7. กด `Export Histogram CSV` เมื่อต้องการนำข้อมูลไปวิเคราะห์ต่อ
 
 ## GitHub Pages
 
 อัปโหลดไฟล์และโฟลเดอร์ทั้งหมดไว้ที่ Root ของ Repository แล้วตั้ง `Settings → Pages → Deploy from a branch → main → / (root)` ไม่ต้อง Build หรือ `npm install`
 
-## ข้อจำกัด
+## ผลทดสอบกับไฟล์ตัวอย่าง
 
-Pattern Engine รุ่นนี้รองรับลำดับ `+1` หรือ `−1` พร้อม Offset/Shift หากข้อมูลมีหลายแพตเทิร์น, ลำดับแบบงู หรือ Dummy Land ให้แบ่งช่วงและวาง Anchor แยกแต่ละช่วง
+- CAD Components: 2,591
+- CAD Lands: 24,625
+- Raw-data Parts: 1 (`U1`)
+- X-ray Lands: 17,662
+- Mapping: 17,662/17,662
+- Measurement: อ่านจากคอลัมน์ T
+- ตัวอย่าง `X-ray 17660 → CAD CU71 → XML ID 18572`

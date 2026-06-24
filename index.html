@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
-  <title>BGA Land Mapper v0.3.0</title>
+  <title>BGA Land Mapper v0.4.0</title>
 </head>
 <body>
   <header class="topbar">
@@ -173,16 +173,20 @@
             <span class="eyebrow">MEASUREMENT</span>
             <h2>Histogram</h2>
           </div>
-          <label class="compact-control">Bins
-            <select id="histogramBins">
-              <option value="10">10</option>
-              <option value="20" selected>20</option>
-              <option value="30">30</option>
-              <option value="50">50</option>
-            </select>
-          </label>
+          <div class="histogram-heading-actions">
+            <label class="compact-control">Bins
+              <select id="histogramBins">
+                <option value="10">10</option>
+                <option value="20" selected>20</option>
+                <option value="30">30</option>
+                <option value="50">50</option>
+                <option value="80">80</option>
+              </select>
+            </label>
+            <button id="expandHistogramButton" class="icon-button histogram-expand-button" type="button" title="ขยาย Histogram" aria-label="ขยาย Histogram">⛶</button>
+          </div>
         </div>
-        <canvas id="measurementHistogram" height="170" aria-label="Measurement histogram"></canvas>
+        <canvas id="measurementHistogram" height="170" aria-label="Measurement histogram" title="คลิกเพื่อเปิด Histogram แบบละเอียด"></canvas>
         <div class="histogram-stats">
           <div><span>Count</span><strong id="histCount">0</strong></div>
           <div><span>Min</span><strong id="histMin">—</strong></div>
@@ -289,6 +293,91 @@
           </div>
           <p class="helper-text">ทุกคำสั่งบันทึกใน History และย้อนกลับด้วย Undo/Redo ได้</p>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="histogramOverlay" class="modal-overlay histogram-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="histogramDialogTitle">
+    <div class="histogram-dialog panel">
+      <header class="histogram-dialog-header">
+        <div>
+          <span class="eyebrow">MEASUREMENT ANALYSIS</span>
+          <h2 id="histogramDialogTitle">Histogram แบบละเอียด</h2>
+          <p id="detailedHistogramPart">เลือก Part เพื่อแสดงข้อมูล</p>
+        </div>
+        <button id="closeHistogramButton" class="icon-button" type="button" aria-label="ปิด">✕</button>
+      </header>
+
+      <div class="histogram-toolbar">
+        <label>Bins
+          <select id="detailedHistogramBins">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="30">30</option>
+            <option value="50" selected>50</option>
+            <option value="80">80</option>
+            <option value="100">100</option>
+            <option value="150">150</option>
+            <option value="200">200</option>
+          </select>
+        </label>
+        <label>แกน Y
+          <select id="histogramYMode">
+            <option value="count">จำนวน Land</option>
+            <option value="percent">เปอร์เซ็นต์</option>
+          </select>
+        </label>
+        <label>ค่าต่ำสุดของช่วง<input id="histogramRangeMin" type="number" step="any" placeholder="อัตโนมัติ" /></label>
+        <label>ค่าสูงสุดของช่วง<input id="histogramRangeMax" type="number" step="any" placeholder="อัตโนมัติ" /></label>
+        <button id="applyHistogramRangeButton" class="primary" type="button">ใช้ช่วง</button>
+        <button id="resetHistogramRangeButton" type="button">ดูทั้งหมด</button>
+        <button id="zoomHistogramBinButton" type="button" disabled>ขยายแท่งที่เลือก</button>
+        <button id="exportHistogramButton" type="button">Export Histogram CSV</button>
+      </div>
+
+      <div class="histogram-detail-layout">
+        <section class="histogram-canvas-card">
+          <div class="histogram-canvas-wrap">
+            <canvas id="detailedHistogramCanvas" aria-label="Detailed measurement histogram"></canvas>
+            <div id="histogramTooltip" class="histogram-tooltip hidden"></div>
+            <div id="histogramSelectionLabel" class="histogram-selection-label hidden"></div>
+          </div>
+          <div class="histogram-interaction-help">
+            <span>ล้อเมาส์: ซูมช่วงค่า</span>
+            <span>ลากบนกราฟ: เลือกช่วง</span>
+            <span>คลิกแท่ง: ดูรายละเอียด</span>
+          </div>
+        </section>
+
+        <aside class="histogram-detail-sidebar">
+          <div class="histogram-detail-stats">
+            <div><span>ทั้งหมด</span><strong id="detailHistTotal">0</strong></div>
+            <div><span>ในช่วงที่ดู</span><strong id="detailHistInRange">0</strong></div>
+            <div><span>Min</span><strong id="detailHistMin">—</strong></div>
+            <div><span>Q1</span><strong id="detailHistQ1">—</strong></div>
+            <div><span>Average</span><strong id="detailHistAverage">—</strong></div>
+            <div><span>Median</span><strong id="detailHistMedian">—</strong></div>
+            <div><span>Q3</span><strong id="detailHistQ3">—</strong></div>
+            <div><span>Max</span><strong id="detailHistMax">—</strong></div>
+            <div><span>Std. deviation</span><strong id="detailHistStdDev">—</strong></div>
+          </div>
+
+          <section class="selected-bin-card">
+            <span class="eyebrow">SELECTED BIN</span>
+            <strong id="selectedBinRange">ยังไม่ได้เลือกแท่ง</strong>
+            <div class="selected-bin-grid">
+              <div><span>Count</span><strong id="selectedBinCount">—</strong></div>
+              <div><span>Percent</span><strong id="selectedBinPercent">—</strong></div>
+              <div><span>Cumulative</span><strong id="selectedBinCumulative">—</strong></div>
+            </div>
+          </section>
+
+          <label class="toggle-row histogram-filter-toggle">
+            <input id="histogramCadFilter" type="checkbox" />
+            <span>เน้นเฉพาะ Measurement ในช่วงที่กำลังดูบน CAD</span>
+          </label>
+          <p id="detailedHistogramMessage" class="helper-text">Histogram จะแสดงข้อมูลของ Part ที่เลือกจากข้อมูลดิบเท่านั้น</p>
+        </aside>
       </div>
     </div>
   </div>

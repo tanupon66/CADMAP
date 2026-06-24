@@ -10,6 +10,13 @@ const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map((match) => match[1])
 const refs = new Set([...app.matchAll(/\$\('([^']+)'\)/g)].map((match) => match[1]));
 assert.deepEqual([...refs].filter((id) => !ids.has(id)), []);
 assert(html.includes('measurementHistogram'));
+assert(html.includes('detailedHistogramCanvas'));
+assert(html.includes('histogramRangeMin'));
+assert(html.includes('histogramRangeMax'));
+assert(html.includes('histogramCadFilter'));
+assert(app.includes('renderDetailedHistogram'));
+assert(app.includes('exportHistogramCsv'));
+assert(app.includes('Std. deviation') || html.includes('Std. deviation'));
 assert(html.includes('Raw-data parts'));
 assert.equal(/Result code|result_code/i.test(html + app + parser), false);
 console.log('static DOM and removed-result checks passed');

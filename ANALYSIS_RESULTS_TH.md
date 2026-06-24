@@ -135,3 +135,9 @@ Component ID + X-ray local Land + XML global LandId + Coordinate
 - Measurement แสดงเป็น Heatmap และ Histogram
 - Viewer แสดงเฉพาะ Part ที่พบในข้อมูลดิบ โดยไฟล์ตัวอย่างนี้แสดงเฉพาะ U1
 - หากข้อมูลดิบมีหลาย Part โปรแกรมจะแยก Component, Mapping และ Histogram ให้แต่ละ Part
+
+## อัปเดต v0.4.0 — Histogram แบบละเอียด
+
+เพิ่มหน้าต่าง Histogram เต็มหน้าจอสำหรับวิเคราะห์ Measurement ของ Part ที่เลือก โดยรองรับ 10–200 bins, Count/Percent, การซูมด้วยล้อเมาส์, การลากเลือกช่วง, การกำหนด Min/Max, สถิติ Q1/Q3 และ Standard deviation รวมถึงการคลิกแท่งเพื่อดู Count, Percent และ Cumulative ของแต่ละช่วง
+
+ช่วงที่กำลังดูสามารถใช้เน้น Land บน CAD ได้ โดย Land นอกช่วงจะถูกลดความเด่นลง ทำให้ตรวจหาพื้นที่ที่มี Measurement อยู่ในกลุ่มที่สนใจได้เร็วขึ้น และสามารถส่งออก Histogram ปัจจุบันเป็น CSV ได้
