@@ -272,11 +272,24 @@ function majorityValue(values) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0] || ['', 0];
 }
 
-export function autoDetectSchema(rows, xmlData) {
+export function autoDetectSchema(rows, xmlData, options = {}) {
   const maxCols = Math.max(0, ...rows.map((row) => row.length));
   const normalizeMatch = (value) => String(value ?? '').trim().toLocaleUpperCase();
-  const componentNames = new Set(xmlData.components.map((component) => normalizeMatch(component.name)).filter(Boolean));
-  const packageNames = new Set(xmlData.components.map((component) => normalizeMatch(component.packageName)).filter(Boolean));
+  const allCadData = [xmlData, options.alternateCadData].filter(Boolean);
+  const components = allCadData.flatMap((data) => data.components || []);
+  const componentNames = new Set(components.map((component) => normalizeMatch(component.name)).filter(Boolean));
+  const packageNames = new Set(components.map((component) => normalizeMatch(component.packageName)).filter(Boolean));
+  const cadNames = new Set();
+  const globalIds = new Set();
+  let maximumLocalIndex = 0;
+  for (const component of components) {
+    maximumLocalIndex = Math.max(maximumLocalIndex, component.lands?.length || 0);
+    for (const land of component.lands || []) {
+      const name = normalizeMatch(land.cadName);
+      if (name) cadNames.add(name);
+      if (land.globalId != null) globalIds.add(String(land.globalId));
+    }
+  }
   const descriptors = [];
 
   for (let col = 0; col < maxCols; col += 1) {
@@ -284,13 +297,21 @@ export function autoDetectSchema(rows, xmlData) {
     const [majority, majorityCount] = majorityValue(values);
     const numeric = values.filter((value) => Number.isFinite(Number(value)));
     const integers = numeric.filter((value) => Number.isInteger(Number(value)) && Number(value) > 0);
-    const unique = new Set(values.map(String));
+    const unique = new Set(values.map((value) => String(value).trim()));
     const componentHits = values.filter((value) => componentNames.has(normalizeMatch(value))).length;
     const packageHits = values.filter((value) => packageNames.has(normalizeMatch(value))).length;
+    const cadNameHits = values.filter((value) => cadNames.has(normalizeMatch(value))).length;
+    const globalIdHits = values.filter((value) => globalIds.has(String(value).trim())).length;
+    const localIndexHits = values.filter((value) => {
+      const n = Number(value);
+      return Number.isInteger(n) && n > 0 && n <= maximumLocalIndex;
+    }).length;
     let sequentialHits = 0;
     for (let i = 0; i < Math.min(values.length, 1500); i += 1) {
       if (Number(values[i]) === i + 1) sequentialHits += 1;
     }
+    const headerText = normalizeMatch(rows[0]?.[col]);
+    const headerIdentifierBonus = /LAND|PAD|BALL|PIN|POINT|LOCATION|NAME|ID|NUMBER/.test(headerText) ? 1 : 0;
     descriptors.push({
       col,
       header: rows[0]?.[col] ?? '',
@@ -303,7 +324,14 @@ export function autoDetectSchema(rows, xmlData) {
       uniqueCount: unique.size,
       componentHits,
       packageHits,
+      cadNameHits,
+      cadNameRatio: values.length ? cadNameHits / values.length : 0,
+      globalIdHits,
+      globalIdRatio: values.length ? globalIdHits / values.length : 0,
+      localIndexHits,
+      localIndexRatio: values.length ? localIndexHits / values.length : 0,
       sequentialRatio: values.length ? sequentialHits / Math.min(values.length, 1500) : 0,
+      headerIdentifierBonus,
     });
   }
 
@@ -312,10 +340,80 @@ export function autoDetectSchema(rows, xmlData) {
   const packageCol = best('packageHits');
   const featureCol = descriptors.find((d) => String(d.majority).toLowerCase() === 'land' && d.majorityRatio > 0.7)?.col ?? null;
 
+  // Re-score identifiers within the component named on each raw-data row. Global
+  // board-wide sets cause false positives for constants such as 14 or 67 because
+  // another component may legitimately contain those CAD names or XML IDs.
+  const componentsByNameForDetection = new Map();
+  for (const component of components) {
+    const key = normalizeMatch(component.name);
+    if (!componentsByNameForDetection.has(key)) componentsByNameForDetection.set(key, []);
+    componentsByNameForDetection.get(key).push(component);
+  }
+  const contextCache = new Map();
+  const contextForRow = (row) => {
+    const componentName = normalizeMatch(row?.[componentCol]);
+    const packageName = normalizeMatch(row?.[packageCol]);
+    const cacheKey = `${componentName}\u0000${packageName}`;
+    if (contextCache.has(cacheKey)) return contextCache.get(cacheKey);
+    let candidates = componentsByNameForDetection.get(componentName) || [];
+    if (packageName) {
+      const exact = candidates.filter((component) => normalizeMatch(component.packageName) === packageName);
+      if (exact.length) candidates = exact;
+    }
+    const names = new Set();
+    const ids = new Set();
+    let maxLocal = 0;
+    for (const component of candidates) {
+      maxLocal = Math.max(maxLocal, component.lands?.length || 0);
+      for (const land of component.lands || []) {
+        const name = normalizeMatch(land.cadName);
+        if (name) names.add(name);
+        if (land.globalId != null) ids.add(String(land.globalId));
+      }
+    }
+    const context = { names, ids, maxLocal };
+    contextCache.set(cacheKey, context);
+    return context;
+  };
+  const sampledRows = rows.slice(1, 4001);
+  for (const descriptor of descriptors) {
+    let cadNameHits = 0;
+    let globalIdHits = 0;
+    let localIndexHits = 0;
+    let valueCount = 0;
+    for (const row of sampledRows) {
+      const value = row?.[descriptor.col];
+      if (value === null || value === undefined || value === '') continue;
+      valueCount += 1;
+      const context = contextForRow(row);
+      if (context.names.has(normalizeMatch(value))) cadNameHits += 1;
+      if (context.ids.has(String(value).trim())) globalIdHits += 1;
+      const n = Number(value);
+      if (Number.isInteger(n) && n > 0 && n <= context.maxLocal) localIndexHits += 1;
+    }
+    descriptor.cadNameHits = cadNameHits;
+    descriptor.cadNameRatio = valueCount ? cadNameHits / valueCount : 0;
+    descriptor.globalIdHits = globalIdHits;
+    descriptor.globalIdRatio = valueCount ? globalIdHits / valueCount : 0;
+    descriptor.localIndexHits = localIndexHits;
+    descriptor.localIndexRatio = valueCount ? localIndexHits / valueCount : 0;
+  }
+
   const landCandidates = descriptors
-    .filter((d) => d.col !== componentCol && d.col !== packageCol && d.integerRatio > 0.95 && d.uniqueCount > 10)
-    .map((d) => ({ ...d, score: d.sequentialRatio * 4 + Math.min(1, d.uniqueCount / 1000) }))
-    .sort((a, b) => b.score - a.score || a.col - b.col);
+    .filter((d) => d.col !== componentCol && d.col !== packageCol && d.col !== featureCol && (d.uniqueCount > 10 || d.cadNameRatio >= 0.5 || d.sequentialRatio >= 0.8 || (d.globalIdRatio >= 0.8 && d.uniqueCount / Math.max(1, d.values.length) >= 0.8)))
+    .map((d) => ({
+      ...d,
+      score:
+        d.cadNameRatio * 24 +
+        d.globalIdRatio * 12 +
+        d.sequentialRatio * 6 +
+        d.localIndexRatio * 2 +
+        d.headerIdentifierBonus * 0.8 +
+        (featureCol != null ? Math.max(0, 1.8 - Math.abs(d.col - featureCol) * 0.45) : 0) +
+        Math.min(1.5, d.uniqueCount / Math.max(100, rows.length * 0.2)),
+    }))
+    .filter((d) => d.score > 0.5)
+    .sort((a, b) => b.score - a.score || b.cadNameHits - a.cadNameHits || b.globalIdHits - a.globalIdHits || a.col - b.col);
   const landCol = landCandidates[0]?.col ?? 0;
 
   let measurementCol = null;
@@ -323,8 +421,16 @@ export function autoDetectSchema(rows, xmlData) {
   if (pixelDescriptor && pixelDescriptor.col + 1 < maxCols) measurementCol = pixelDescriptor.col + 1;
   if (measurementCol == null) {
     measurementCol = descriptors
-      .filter((d) => d.col !== landCol && d.numericRatio > 0.9 && d.uniqueCount > 10 && d.uniqueCount < Math.max(20, rows.length * 0.75))
+      .filter((d) => d.col !== landCol && d.col !== componentCol && d.col !== packageCol && d.numericRatio > 0.9 && d.uniqueCount > 10 && d.uniqueCount < Math.max(20, rows.length * 0.75))
       .sort((a, b) => b.uniqueCount - a.uniqueCount)[0]?.col ?? null;
+  }
+
+  const selectedLandDescriptor = landCandidates[0] || descriptors.find((d) => d.col === landCol) || null;
+  let landMode = 'auto';
+  if (selectedLandDescriptor) {
+    if (selectedLandDescriptor.cadNameRatio >= 0.2 || selectedLandDescriptor.cadNameHits > selectedLandDescriptor.globalIdHits) landMode = 'cad-name';
+    else if (selectedLandDescriptor.sequentialRatio >= 0.8) landMode = 'local-index';
+    else if (selectedLandDescriptor.globalIdRatio >= 0.5) landMode = 'global-id';
   }
 
   return {
@@ -332,9 +438,17 @@ export function autoDetectSchema(rows, xmlData) {
     packageCol,
     featureCol,
     landCol,
+    landMode,
     measurementCol,
     descriptors,
-    alternates: { land: landCandidates.slice(1, 4).map((d) => d.col) },
+    alternates: { land: landCandidates.slice(1, 6).map((d) => d.col) },
+    landDetection: landCandidates.slice(0, 6).map((d) => ({
+      col: d.col,
+      score: d.score,
+      cadNameHits: d.cadNameHits,
+      globalIdHits: d.globalIdHits,
+      sequentialRatio: d.sequentialRatio,
+    })),
   };
 }
 
@@ -347,48 +461,103 @@ function confidenceFor({ exactComponent, exactPackage, countMatch, contiguous })
   return Math.min(100, score);
 }
 
-export function buildMappings(xmlData, xlsxData, schema) {
+function normalizeIdentifier(value) {
+  return String(value ?? '').trim().toLocaleUpperCase();
+}
+
+function componentsByNormalizedName(xmlData) {
+  const map = new Map();
+  for (const component of xmlData?.components || []) {
+    const key = normalizeIdentifier(component.name);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(component);
+  }
+  return map;
+}
+
+function resolveComponentFromMap(map, componentName, packageName) {
+  const candidates = map.get(normalizeIdentifier(componentName)) || [];
+  if (!candidates.length) return null;
+  const normalizedPackage = normalizeIdentifier(packageName);
+  if (normalizedPackage) {
+    const exactPackage = candidates.find((component) => normalizeIdentifier(component.packageName) === normalizedPackage);
+    if (exactPackage) return exactPackage;
+  }
+  return candidates[0] || null;
+}
+
+function buildLandLookups(component) {
+  const byName = new Map();
+  const byGlobalId = new Map();
+  for (const land of component?.lands || []) {
+    const name = normalizeIdentifier(land.cadName);
+    if (name) {
+      if (!byName.has(name)) byName.set(name, []);
+      byName.get(name).push(land);
+    }
+    if (land.globalId != null) byGlobalId.set(String(land.globalId), land);
+  }
+  return { byName, byGlobalId };
+}
+
+function mapAlternateLandToActive(alternateLand, activeComponent, activeLookups, coordinateTolerance = 0.08) {
+  if (!alternateLand || !activeComponent) return null;
+  const byId = alternateLand.globalId != null ? activeLookups.byGlobalId.get(String(alternateLand.globalId)) : null;
+  if (byId) return byId;
+  if (!Number.isFinite(alternateLand.centerX) || !Number.isFinite(alternateLand.centerY)) return null;
+  let best = null;
+  let bestDistance = Infinity;
+  for (const candidate of activeComponent.lands || []) {
+    if (!Number.isFinite(candidate.centerX) || !Number.isFinite(candidate.centerY)) continue;
+    const distance = Math.hypot(candidate.centerX - alternateLand.centerX, candidate.centerY - alternateLand.centerY);
+    if (distance < bestDistance) { best = candidate; bestDistance = distance; }
+  }
+  return bestDistance <= coordinateTolerance ? best : null;
+}
+
+export function buildMappings(xmlData, xlsxData, schema, options = {}) {
   const rows = xlsxData.activeSheet.rows;
   const dataRows = rows.slice(1);
-  const normalize = (value) => String(value ?? '').trim().toLocaleUpperCase();
-  const componentsByName = new Map();
-  for (const component of xmlData.components) {
-    const key = normalize(component.name);
-    if (!componentsByName.has(key)) componentsByName.set(key, []);
-    componentsByName.get(key).push(component);
-  }
+  const activeComponentsByName = componentsByNormalizedName(xmlData);
+  const alternateCadData = options.alternateCadData || null;
+  const alternateComponentsByName = componentsByNormalizedName(alternateCadData);
 
-  const resolveComponent = (componentName, packageName) => {
-    const candidates = componentsByName.get(normalize(componentName)) || [];
-    if (!candidates.length) return null;
-    const normalizedPackage = normalize(packageName);
-    if (normalizedPackage) {
-      const exactPackage = candidates.find((component) => normalize(component.packageName) === normalizedPackage);
-      if (exactPackage) return exactPackage;
-    }
-    return candidates.length === 1 ? candidates[0] : candidates[0];
-  };
+  const resolveActiveComponent = (componentName, packageName) => resolveComponentFromMap(activeComponentsByName, componentName, packageName);
+  const resolveAlternateComponent = (componentName, packageName) => resolveComponentFromMap(alternateComponentsByName, componentName, packageName);
 
-  // Group by the parts that really exist in the raw X-ray data. The viewer uses
-  // these groups instead of exposing every component found in the CAD XML.
+  // Group by the parts that really exist in the raw data. The viewer uses these
+  // groups instead of exposing every component found in the CAD XML.
   const rawGroups = new Map();
   for (const row of dataRows) {
     if (!row || row.every((value) => value == null || value === '')) continue;
     const componentName = String(row?.[schema.componentCol] ?? '').trim();
     const packageName = String(row?.[schema.packageCol] ?? '').trim();
-    const key = `${normalize(componentName)}\u0000${normalize(packageName)}`;
+    const key = `${normalizeIdentifier(componentName)}\u0000${normalizeIdentifier(packageName)}`;
     const group = rawGroups.get(key) || { key, componentName, packageName, count: 0 };
     group.count += 1;
     rawGroups.set(key, group);
   }
 
   const cadNameCounts = new Map();
-  for (const component of xmlData.components) {
-    for (const land of component.lands) {
-      const key = `${component.id}\u0000${land.cadName}`;
+  for (const component of xmlData.components || []) {
+    for (const land of component.lands || []) {
+      const key = `${component.id}\u0000${normalizeIdentifier(land.cadName)}`;
       cadNameCounts.set(key, (cadNameCounts.get(key) || 0) + 1);
     }
   }
+
+  const lookupCache = new Map();
+  const alternateLookupCache = new Map();
+  const getLookups = (component) => {
+    if (!component) return { byName: new Map(), byGlobalId: new Map() };
+    if (!lookupCache.has(component.id)) lookupCache.set(component.id, buildLandLookups(component));
+    return lookupCache.get(component.id);
+  };
+  const getAlternateLookups = (component) => {
+    if (!component) return { byName: new Map(), byGlobalId: new Map() };
+    if (!alternateLookupCache.has(component.id)) alternateLookupCache.set(component.id, buildLandLookups(component));
+    return alternateLookupCache.get(component.id);
+  };
 
   const mappings = [];
   for (let i = 0; i < dataRows.length; i += 1) {
@@ -396,23 +565,77 @@ export function buildMappings(xmlData, xlsxData, schema) {
     if (!row || row.every((value) => value == null || value === '')) continue;
     const componentName = String(row[schema.componentCol] ?? '').trim();
     const packageName = String(row[schema.packageCol] ?? '').trim();
-    const localIndex = Number(row[schema.landCol]);
-    const rawKey = `${normalize(componentName)}\u0000${normalize(packageName)}`;
-    const component = resolveComponent(componentName, packageName);
-    const land = component && Number.isInteger(localIndex) && localIndex > 0 ? component.lands[localIndex - 1] : null;
+    const rawLandValue = row[schema.landCol];
+    const rawLandId = String(rawLandValue ?? '').trim();
+    const normalizedRawLandId = normalizeIdentifier(rawLandId);
+    const numericIdentifier = rawLandId !== '' && Number.isFinite(Number(rawLandId)) ? Number(rawLandId) : null;
+    const rawKey = `${normalizeIdentifier(componentName)}\u0000${normalizeIdentifier(packageName)}`;
+    const component = resolveActiveComponent(componentName, packageName);
+    const alternateComponent = resolveAlternateComponent(componentName, packageName);
+    const activeLookups = getLookups(component);
+    const alternateLookups = getAlternateLookups(alternateComponent);
+    let land = null;
+    let mappingMethod = 'unmapped';
+    let verified = false;
+    let confidence = 0;
+    let ambiguityCount = 0;
+
+    const landMode = schema.landMode || 'auto';
+    const tryDirectName = () => {
+      if (land || ambiguityCount || !normalizedRawLandId) return;
+      const directNameMatches = activeLookups.byName.get(normalizedRawLandId) || [];
+      if (directNameMatches.length === 1) {
+        land = directNameMatches[0]; mappingMethod = 'exact-cad-name'; verified = true; confidence = 100;
+      } else if (directNameMatches.length > 1) {
+        ambiguityCount = directNameMatches.length; mappingMethod = 'ambiguous-cad-name';
+      }
+    };
+    const tryAlternateName = () => {
+      if (land || !alternateComponent || !normalizedRawLandId) return;
+      const alternateNameMatches = alternateLookups.byName.get(normalizedRawLandId) || [];
+      if (alternateNameMatches.length === 1) {
+        const bridged = mapAlternateLandToActive(alternateNameMatches[0], component, activeLookups, options.coordinateTolerance || 0.08);
+        if (bridged) { land = bridged; ambiguityCount = 0; mappingMethod = 'exact-other-cad-name'; verified = true; confidence = 98; }
+      } else if (alternateNameMatches.length > 1) {
+        ambiguityCount = alternateNameMatches.length; mappingMethod = 'ambiguous-other-cad-name';
+      }
+    };
+    const tryGlobalId = () => {
+      if (land || numericIdentifier == null || !Number.isInteger(numericIdentifier)) return;
+      const byGlobal = activeLookups.byGlobalId.get(String(numericIdentifier));
+      if (byGlobal) { land = byGlobal; ambiguityCount = 0; mappingMethod = 'xml-global-id'; verified = true; confidence = 100; }
+    };
+    const tryLocalIndex = () => {
+      if (land || !component || numericIdentifier == null || !Number.isInteger(numericIdentifier)) return;
+      if (numericIdentifier > 0 && numericIdentifier <= component.lands.length) {
+        land = component.lands[numericIdentifier - 1]; ambiguityCount = 0; mappingMethod = 'local-order-guess'; verified = false; confidence = 30;
+      }
+    };
+
+    if (landMode === 'local-index') {
+      tryLocalIndex();
+      if (!land && numericIdentifier == null) { tryDirectName(); tryAlternateName(); }
+    } else if (landMode === 'global-id') {
+      tryGlobalId(); tryDirectName(); tryAlternateName(); tryLocalIndex();
+    } else if (landMode === 'cad-name') {
+      tryDirectName(); tryAlternateName(); tryGlobalId(); tryLocalIndex();
+    } else {
+      tryDirectName(); tryAlternateName(); tryGlobalId(); tryLocalIndex();
+    }
+
     const countMatch = component ? rawGroups.get(rawKey)?.count === component.lands.length : false;
-    const exactPackage = Boolean(component && packageName && normalize(component.packageName) === normalize(packageName));
-    const confidence = confidenceFor({
-      exactComponent: Boolean(component), exactPackage, countMatch,
-      contiguous: Boolean(component?.contiguousGlobalIds),
-    });
+    const exactPackage = Boolean(component && packageName && normalizeIdentifier(component.packageName) === normalizeIdentifier(packageName));
+    const baseConfidence = confidenceFor({ exactComponent: Boolean(component), exactPackage, countMatch, contiguous: Boolean(component?.contiguousGlobalIds) });
+    if (land && !verified) confidence = Math.min(confidence || 30, baseConfidence || 30);
 
     mappings.push({
       sourceRow: i + 2,
+      rawOrder: i + 1,
       rawPartKey: rawKey,
       componentName,
       packageName,
-      localIndex: Number.isFinite(localIndex) ? localIndex : null,
+      rawLandId,
+      localIndex: rawLandValue ?? rawLandId,
       componentId: component?.id ?? null,
       globalId: land?.globalId ?? null,
       cadName: land?.cadName ?? '',
@@ -423,20 +646,21 @@ export function buildMappings(xmlData, xlsxData, schema) {
       width: land?.width ?? null,
       length: land?.length ?? null,
       measurement: schema.measurementCol == null ? null : row[schema.measurementCol],
-      confidence: land ? Math.min(40, confidence) : 0,
+      confidence,
       mapped: Boolean(land),
       manual: false,
-      verified: false,
+      verified,
       anchorLocked: false,
-      mappingMethod: land ? 'auto-order-guess' : 'unmapped',
-      duplicateCadNameCount: land ? (cadNameCounts.get(`${component.id}\u0000${land.cadName}`) || 1) : 0,
+      mappingMethod,
+      ambiguityCount,
+      duplicateCadNameCount: land ? (cadNameCounts.get(`${component.id}\u0000${normalizeIdentifier(land.cadName)}`) || 1) : 0,
       raw: row,
     });
   }
 
   const componentSummaries = [];
   for (const group of rawGroups.values()) {
-    const component = resolveComponent(group.componentName, group.packageName);
+    const component = resolveActiveComponent(group.componentName, group.packageName);
     componentSummaries.push({
       rawPartKey: group.key,
       componentName: group.componentName,
@@ -459,7 +683,14 @@ export function buildMappings(xmlData, xlsxData, schema) {
     stats: {
       total: mappings.length,
       mapped: mappings.filter((m) => m.mapped).length,
+      verified: mappings.filter((m) => m.verified).length,
+      unverified: mappings.filter((m) => m.mapped && !m.verified).length,
       unmapped: mappings.filter((m) => !m.mapped).length,
+      ambiguous: mappings.filter((m) => m.ambiguityCount > 1).length,
+      exactCadName: mappings.filter((m) => m.mappingMethod === 'exact-cad-name').length,
+      exactOtherCadName: mappings.filter((m) => m.mappingMethod === 'exact-other-cad-name').length,
+      xmlGlobalId: mappings.filter((m) => m.mappingMethod === 'xml-global-id').length,
+      localOrderGuess: mappings.filter((m) => m.mappingMethod === 'local-order-guess').length,
       duplicateCadNames: mappings.filter((m) => m.duplicateCadNameCount > 1).length,
       rawParts: componentSummaries.length,
       matchedRawParts: componentSummaries.filter((summary) => summary.matched).length,

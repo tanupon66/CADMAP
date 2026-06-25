@@ -102,6 +102,10 @@ const formatFloat = new Intl.NumberFormat('th-TH', { maximumFractionDigits: 4 })
 
 function cadRoleLabel(role) { return role === 'generated' ? 'Generated CAD' : 'Original CAD'; }
 function activeCadFile() { return state.activeCadRole ? state.cadFiles[state.activeCadRole] : null; }
+function alternateCadRole() { return state.activeCadRole === 'original' ? 'generated' : state.activeCadRole === 'generated' ? 'original' : null; }
+function alternateCadData() { const role = alternateCadRole(); return role ? state.cadFiles[role]?.data || null : null; }
+function mappingOrder(mapping) { const value = Number(mapping?.rawOrder ?? mapping?.sourceRow ?? mapping?.localIndex); return Number.isFinite(value) ? value : 0; }
+function mappingLabel(mapping) { return String(mapping?.rawLandId ?? mapping?.localIndex ?? ''); }
 function syncCadFileLabels() {
   els.xmlFileName.textContent = state.cadFiles.original?.name || '—';
   els.generatedXmlFileName.textContent = state.cadFiles.generated?.name || '—';
@@ -135,9 +139,9 @@ function rebuildMappingForActiveCad() {
     els.mappingTableBody.innerHTML = '';
     return;
   }
-  state.schema = autoDetectSchema(state.xlsxData.activeSheet.rows, state.xmlData);
+  state.schema = autoDetectSchema(state.xlsxData.activeSheet.rows, state.xmlData, { alternateCadData: alternateCadData() });
   populateSchemaControls();
-  state.mappingData = buildMappings(state.xmlData, state.xlsxData, state.schema);
+  state.mappingData = buildMappings(state.xmlData, state.xlsxData, state.schema, { alternateCadData: alternateCadData(), coordinateTolerance: state.cadCompare.tolerance });
   normalizeMappings();
   state.undoStack = []; state.redoStack = []; state.preview = null; state.selected = null; state.page = 1;
 }
@@ -165,6 +169,17 @@ function storeCadFile(role, xmlText, name) {
   return state.cadFiles[role];
 }
 function canCompareCad() { return Boolean(state.cadFiles.original?.data && state.cadFiles.generated?.data); }
+function availablePairLabel() {
+  const hasRaw = Boolean(state.xlsxData);
+  const hasOriginal = Boolean(state.cadFiles.original?.data);
+  const hasGenerated = Boolean(state.cadFiles.generated?.data);
+  if (hasRaw && hasOriginal && hasGenerated) return `Raw Data ↔ ${cadRoleLabel(state.activeCadRole)} พร้อมสะพาน Original ↔ Generated`;
+  if (hasRaw && state.xmlData) return `Raw Data ↔ ${cadRoleLabel(state.activeCadRole)}`;
+  if (hasOriginal && hasGenerated) return 'Original CAD ↔ Generated CAD';
+  if (state.xmlData) return `${cadRoleLabel(state.activeCadRole)} Viewer`;
+  if (hasRaw) return 'Raw Data รอ CAD อีกหนึ่งไฟล์';
+  return 'ยังไม่มีคู่ข้อมูล';
+}
 function rebuildCadComparison({ showToast = false } = {}) {
   if (!canCompareCad()) { state.cadCompare.result = null; updateCadCompareControls(); return null; }
   state.cadCompare.tolerance = Math.max(0.0001, Number(els.cadCompareTolerance.value) || state.cadCompare.tolerance || 0.08);
@@ -311,7 +326,7 @@ function setEditMode(enabled) {
   draw();
 }
 function advanceSelected(delta) {
-  const mappings = currentMappings().slice().sort((a, b) => Number(a.localIndex) - Number(b.localIndex));
+  const mappings = currentMappings().slice().sort((a, b) => mappingOrder(a) - mappingOrder(b));
   if (!mappings.length) return;
   let index = state.selected ? mappings.indexOf(state.selected) : -1;
   index = Math.max(0, Math.min(mappings.length - 1, index + delta));
@@ -646,10 +661,10 @@ function renderDuplicatePanel() {
 function normalizeMappings() {
   for (const mapping of state.mappingData?.mappings || []) {
     if (mapping.anchorLocked == null) mapping.anchorLocked = false;
-    if (!mapping.mappingMethod) mapping.mappingMethod = mapping.mapped ? 'auto-order-guess' : 'unmapped';
+    if (!mapping.mappingMethod) mapping.mappingMethod = mapping.mapped ? 'local-order-guess' : 'unmapped';
     if (mapping.alias == null) mapping.alias = '';
     mapping.verified = isVerifiedMapping(mapping);
-    if (!mapping.verified && mapping.mapped && !mapping.mappingMethod) mapping.mappingMethod = 'auto-order-guess';
+    if (!mapping.verified && mapping.mapped && !mapping.mappingMethod) mapping.mappingMethod = 'local-order-guess';
   }
   recomputeStats();
 }
@@ -662,6 +677,11 @@ function recomputeStats() {
     verified: mappings.filter(isVerifiedMapping).length,
     unverified: mappings.filter((m) => m.mapped && !isVerifiedMapping(m)).length,
     unmapped: mappings.filter((m) => !m.mapped).length,
+    ambiguous: mappings.filter((m) => Number(m.ambiguityCount) > 1).length,
+    exactCadName: mappings.filter((m) => m.mappingMethod === 'exact-cad-name').length,
+    exactOtherCadName: mappings.filter((m) => m.mappingMethod === 'exact-other-cad-name').length,
+    xmlGlobalId: mappings.filter((m) => m.mappingMethod === 'xml-global-id').length,
+    localOrderGuess: mappings.filter((m) => m.mappingMethod === 'local-order-guess').length,
     duplicateCadNames: mappings.filter((m) => m.duplicateCadNameCount > 1).length,
     manual: mappings.filter((m) => m.manual).length,
     anchors: mappings.filter((m) => m.anchorLocked).length,
@@ -717,9 +737,18 @@ function fillColumnSelect(select, descriptors, selected, optional = false) {
     const option = document.createElement('option'); option.value = String(descriptor.col); option.textContent = columnOptionLabel(descriptor); option.selected = descriptor.col === selected; select.append(option);
   }
 }
+function inferLandMode(descriptor) {
+  if (!descriptor) return 'auto';
+  if ((descriptor.cadNameRatio || 0) >= 0.2 || (descriptor.cadNameHits || 0) > (descriptor.globalIdHits || 0)) return 'cad-name';
+  if ((descriptor.sequentialRatio || 0) >= 0.8) return 'local-index';
+  if ((descriptor.globalIdRatio || 0) >= 0.5) return 'global-id';
+  return 'auto';
+}
 function readSchemaControls() {
   const optional = (select) => select.value === '' ? null : Number(select.value);
-  return { ...state.schema, componentCol: Number(els.componentColumn.value), packageCol: Number(els.packageColumn.value), landCol: Number(els.landColumn.value), measurementCol: optional(els.measurementColumn) };
+  const landCol = Number(els.landColumn.value);
+  const descriptor = state.schema?.descriptors?.find((item) => item.col === landCol);
+  return { ...state.schema, componentCol: Number(els.componentColumn.value), packageCol: Number(els.packageColumn.value), landCol, landMode: inferLandMode(descriptor), measurementCol: optional(els.measurementColumn) };
 }
 function populateSchemaControls() {
   if (!state.schema) return;
@@ -770,9 +799,10 @@ function populateComponents(preferredId = null) {
 }
 function updateStats() {
   const stats = state.mappingData?.stats;
-  els.mappedStat.textContent = formatInt.format(stats?.mapped || 0);
-  els.verifiedStat.textContent = formatInt.format(stats?.verified || 0);
-  els.unmappedStat.textContent = formatInt.format(stats?.unmapped || 0);
+  const cadOnlySummary = !stats && state.cadCompare.result ? state.cadCompare.result.summary : null;
+  els.mappedStat.textContent = formatInt.format(stats?.mapped ?? cadOnlySummary?.matchedLands ?? 0);
+  els.verifiedStat.textContent = formatInt.format(stats?.verified ?? cadOnlySummary?.matchedLands ?? 0);
+  els.unmappedStat.textContent = formatInt.format(stats?.unmapped ?? ((cadOnlySummary?.missingGenerated || 0) + (cadOnlySummary?.extraGenerated || 0)));
   const summaries = state.mappingData?.componentSummaries || [];
   if (summaries.length) {
     const shownComponentIds = [...new Set(summaries.filter((item) => item.componentId != null).map((item) => String(item.componentId)))];
@@ -785,14 +815,21 @@ function updateStats() {
   }
   const summary = summaries.find((item) => String(item.componentId) === String(state.selectedComponentId)) || summaries[0];
   const anchors = currentMappings().filter((mapping) => mapping.anchorLocked).length;
-  if (summary?.countMatch) {
-    els.mappingFormula.innerHTML = `Component ${summary.componentName}: พบจำนวน Land ตรงกัน แต่ลำดับ XML เป็นเพียง Auto guess<br>Confirmed ${formatInt.format(stats?.verified || 0)} จุด · Anchor ${formatInt.format(anchors)} จุด`;
-  } else if (summary) els.mappingFormula.textContent = `จำนวนไม่ตรงกัน: X-ray ${summary.xrayCount} / XML ${summary.xmlCount} · ต้องยืนยันด้วย Edit Mode`;
-  else if (state.xmlData) els.mappingFormula.textContent = `${cadRoleLabel(state.activeCadRole)} เปิดแบบ CAD Viewer · เพิ่ม XLSX เมื่อต้องการ Mapping กับข้อมูลดิบ`;
+  if (summary && stats) {
+    const methods = [];
+    if (stats.exactCadName) methods.push(`ชื่อ CAD ตรง ${formatInt.format(stats.exactCadName)}`);
+    if (stats.exactOtherCadName) methods.push(`ผ่าน CAD อีกฝั่ง ${formatInt.format(stats.exactOtherCadName)}`);
+    if (stats.xmlGlobalId) methods.push(`XML ID ${formatInt.format(stats.xmlGlobalId)}`);
+    if (stats.localOrderGuess) methods.push(`เดาลำดับ ${formatInt.format(stats.localOrderGuess)}`);
+    if (stats.ambiguous) methods.push(`ชื่อกำกวม ${formatInt.format(stats.ambiguous)}`);
+    els.mappingFormula.innerHTML = `Component ${summary.componentName}: คอลัมน์ ${columnName(state.schema?.landCol ?? 0)} · โหมด ${state.schema?.landMode || 'auto'} · รองรับตัวเลขและข้อความ<br>${methods.join(' · ') || 'ยังไม่พบคู่'} · Confirmed ${formatInt.format(stats.verified || 0)} · Anchor ${formatInt.format(anchors)}`;
+  } else if (canCompareCad() && state.cadCompare.result) els.mappingFormula.textContent = `Original CAD ↔ Generated CAD จับคู่โดย XML ID และพิกัดได้ ${formatInt.format(state.cadCompare.result.summary.matchedLands)} Land โดยไม่ต้องใช้ข้อมูลดิบ`;
+  else if (state.xmlData) els.mappingFormula.textContent = `${cadRoleLabel(state.activeCadRole)} เปิดแบบ CAD Viewer · อัปโหลด XLSX หรือ CAD อีกฝั่งเพื่อ Mapping`;
   else els.mappingFormula.textContent = 'ยังไม่มีสูตร Mapping';
   const ready = Boolean(state.xmlData && state.xlsxData && state.mappingData);
-  if (ready) els.projectStatus.textContent = `${cadRoleLabel(state.activeCadRole)} · ${formatInt.format(stats.verified || 0)} confirmed · ${formatInt.format(stats.unverified || 0)} unverified`;
-  else if (state.xmlData) els.projectStatus.textContent = `${cadRoleLabel(state.activeCadRole)} · ${formatInt.format(state.xmlData.totalLands)} lands`;
+  if (ready) els.projectStatus.textContent = `${availablePairLabel()} · ${formatInt.format(stats.verified || 0)} verified · ${formatInt.format(stats.unverified || 0)} unverified`;
+  else if (canCompareCad() && state.cadCompare.result) els.projectStatus.textContent = `${availablePairLabel()} · ${formatInt.format(state.cadCompare.result.summary.matchedLands)} matched`;
+  else if (state.xmlData) els.projectStatus.textContent = `${availablePairLabel()} · ${formatInt.format(state.xmlData.totalLands)} lands`;
   else els.projectStatus.textContent = 'ยังไม่ได้เปิดโปรเจกต์';
   els.projectStatus.className = `status-pill ${state.xmlData ? 'ready' : 'muted'}`;
   els.remapButton.disabled = !state.xmlData || !state.xlsxData;
@@ -805,7 +842,7 @@ function runMapping() {
   if (!state.xmlData || !state.xlsxData) return;
   const hasManual = state.mappingData?.mappings.some((m) => m.manual || m.anchorLocked);
   if (hasManual && !window.confirm('คำนวณ Mapping ใหม่จะล้าง Manual mapping และ Anchor ทั้งหมด ต้องการดำเนินการต่อหรือไม่?')) return;
-  state.schema = readSchemaControls(); state.mappingData = buildMappings(state.xmlData, state.xlsxData, state.schema); normalizeMappings(); resetHistogramState();
+  state.schema = readSchemaControls(); state.mappingData = buildMappings(state.xmlData, state.xlsxData, state.schema, { alternateCadData: alternateCadData(), coordinateTolerance: state.cadCompare.tolerance }); normalizeMappings(); resetHistogramState();
   state.undoStack = []; state.redoStack = []; state.preview = null;
   const firstMapped = state.mappingData.mappings.find((mapping) => mapping.mapped);
   populateComponents(firstMapped?.componentId || state.selectedComponentId); state.page = 1;
@@ -841,7 +878,7 @@ async function processFile(file, cadRole = 'auto') {
     if (canCompareCad()) {
       rebuildCadComparison();
       const summary = state.cadCompare.result.summary;
-      els.importMessage.textContent = `พร้อมเปรียบเทียบ Original ↔ Generated · จับคู่ ${formatInt.format(summary.matchedLands)} Land · เปลี่ยนชื่อ ${formatInt.format(summary.renamed + summary.renamedMoved)} จุด`;
+      els.importMessage.textContent = `${availablePairLabel()} · CAD↔CAD จับคู่ ${formatInt.format(summary.matchedLands)} Land · เปลี่ยนชื่อ ${formatInt.format(summary.renamed + summary.renamedMoved)} จุด${state.mappingData ? ` · Raw verified ${formatInt.format(state.mappingData.stats.verified || 0)}` : ''}`;
       if (importedRole === 'generated') openCadCompare();
     } else if (state.xmlData && state.xlsxData && state.mappingData) {
       const summaries = state.mappingData.componentSummaries;
@@ -851,7 +888,7 @@ async function processFile(file, cadRole = 'auto') {
       els.importMessage.textContent = `พบข้อมูลดิบ ${formatInt.format(summaries.length)} Part · จับคู่กับ CAD ได้ ${formatInt.format(matchedParts)} Part · จำนวน Land ตรงกัน ${formatInt.format(exactParts)} Part${missingParts ? ` · ไม่พบใน CAD ${formatInt.format(missingParts)} Part` : ''}`;
     } else if (state.xmlData) {
       els.importMessage.textContent = `เปิด ${cadRoleLabel(state.activeCadRole)} แล้ว · แสดง CAD ได้ทันทีโดยไม่ต้องมี XLSX`;
-    } else if (state.xlsxData) els.importMessage.textContent = 'เปิด XLSX แล้ว กรุณาเลือก Original CAD เพิ่ม';
+    } else if (state.xlsxData) els.importMessage.textContent = 'เปิด XLSX แล้ว · เพิ่ม Original CAD หรือ Generated CAD อย่างใดอย่างหนึ่งเพื่อ Mapping';
 
     populateComponents(state.selectedComponentId); updateStats(); renderTable(); renderTeachPanel(); refreshDuplicateControls(); draw(); renderHistogram();
   } catch (error) {
@@ -889,8 +926,16 @@ function filteredMappings() {
   }
 }
 function mappingStatus(mapping) {
-  if (!mapping.mapped) return { text: 'Unmapped', cls: 'unmapped' };
-  if (isVerifiedMapping(mapping)) return { text: mapping.anchorLocked ? 'Confirmed' : 'Verified', cls: 'verified' };
+  if (!mapping.mapped) {
+    if (Number(mapping.ambiguityCount) > 1) return { text: `Ambiguous ×${mapping.ambiguityCount}`, cls: 'unmapped' };
+    return { text: 'Unmapped', cls: 'unmapped' };
+  }
+  if (isVerifiedMapping(mapping)) {
+    if (mapping.mappingMethod === 'exact-cad-name') return { text: 'Name match', cls: 'verified' };
+    if (mapping.mappingMethod === 'exact-other-cad-name') return { text: 'CAD bridge', cls: 'verified' };
+    if (mapping.mappingMethod === 'xml-global-id') return { text: 'XML ID match', cls: 'verified' };
+    return { text: mapping.anchorLocked ? 'Confirmed' : 'Verified', cls: 'verified' };
+  }
   return { text: 'Unverified', cls: 'unverified' };
 }
 function renderTable() {
@@ -1480,15 +1525,32 @@ function nudgeSelected(delta) {
   if (!land) return toast('ไม่สามารถเลื่อนได้ เพราะถึงขอบเขต CAD แล้ว'); directRemap(mapping, land, `Nudge selected ${delta > 0 ? '+1' : '-1'}`);
 }
 function search() {
-  const query = els.searchInput.value.trim(); if (!query) return; const mappings = state.mappingData?.mappings || []; const number = Number(query); let matches = [];
-  if (Number.isInteger(number)) { matches = currentMappings().filter((m) => Number(m.localIndex) === number); if (!matches.length) matches = mappings.filter((m) => Number(m.globalId) === number); }
-  if (!matches.length) {
-    const lower = query.toLowerCase();
-    matches = currentMappings().filter((m) => String(m.cadName).toLowerCase() === lower || String(m.alias || '').toLowerCase() === lower);
-    if (!matches.length) matches = mappings.filter((m) => String(m.cadName).toLowerCase() === lower || String(m.alias || '').toLowerCase() === lower);
-  }
+  const query = els.searchInput.value.trim(); if (!query) return;
+  const mappings = state.mappingData?.mappings || [];
+  const lower = query.toLowerCase();
+  const number = Number(query);
+  let matches = currentMappings().filter((m) =>
+    String(m.rawLandId ?? m.localIndex ?? '').trim().toLowerCase() === lower ||
+    String(m.cadName || '').trim().toLowerCase() === lower ||
+    String(m.alias || '').trim().toLowerCase() === lower
+  );
+  if (!matches.length) matches = mappings.filter((m) =>
+    String(m.rawLandId ?? m.localIndex ?? '').trim().toLowerCase() === lower ||
+    String(m.cadName || '').trim().toLowerCase() === lower ||
+    String(m.alias || '').trim().toLowerCase() === lower
+  );
+  if (!matches.length && Number.isInteger(number)) matches = mappings.filter((m) => Number(m.globalId) === number);
   if (!matches.length && state.xmlData) {
-    for (const component of state.xmlData.components) for (const land of component.lands) if (String(land.cadName).toLowerCase() === query.toLowerCase() || Number(land.globalId) === number) { state.selectedComponentId = component.id; els.componentSelect.value = component.id; state.duplicateView.selectedName = ''; refreshDuplicateControls(); fitView(); selectLand(land); if (duplicateCountForLand(land) > 1) setSelectedDuplicateName(String(land.cadName).trim(), { fit: true }); toast('พบใน XML แต่ไม่มีแถว X-ray ที่จับคู่'); return; }
+    for (const component of state.xmlData.components) {
+      for (const land of component.lands) {
+        if (String(land.cadName).toLowerCase() === lower || Number(land.globalId) === number) {
+          state.selectedComponentId = component.id; els.componentSelect.value = component.id; state.duplicateView.selectedName = '';
+          refreshDuplicateControls(); fitView(); selectLand(land);
+          if (duplicateCountForLand(land) > 1) setSelectedDuplicateName(String(land.cadName).trim(), { fit: true });
+          toast('พบใน CAD แต่ไม่มีแถวข้อมูลที่จับคู่'); return;
+        }
+      }
+    }
   }
   if (!matches.length) return toast(`ไม่พบ ${query}`);
   selectMapping(matches[0], true);
@@ -1499,7 +1561,7 @@ function search() {
 function openTeachPanel() { if (!state.mappingData) return; els.teachOverlay.classList.remove('hidden'); renderTeachPanel(); }
 function closeTeachPanel() { els.teachOverlay.classList.add('hidden'); }
 function renderTeachPanel() {
-  const component = currentComponent(); const mappings = currentMappings(); const anchors = mappings.filter((mapping) => mapping.anchorLocked).sort((a, b) => Number(a.localIndex) - Number(b.localIndex));
+  const component = currentComponent(); const mappings = currentMappings(); const anchors = mappings.filter((mapping) => mapping.anchorLocked).sort((a, b) => mappingOrder(a) - mappingOrder(b));
   els.teachComponentLabel.textContent = component ? `${component.name} · ${formatInt.format(component.lands.length)} CAD lands · ${formatInt.format(mappings.length)} X-ray rows` : 'ยังไม่มี Component';
   els.anchorCountLabel.textContent = `${formatInt.format(anchors.length)} จุด`; els.anchorList.innerHTML = '';
   if (!anchors.length) els.anchorList.innerHTML = '<p class="empty-state">ยังไม่มี Anchor — เลือก Land แล้วกด “ล็อกเป็น Anchor”</p>';
@@ -1548,11 +1610,11 @@ function applyPattern(highOnly = false) {
 }
 function clearAllAnchors() {
   const anchors = currentMappings().filter((mapping) => mapping.anchorLocked); if (!anchors.length) return; if (!window.confirm(`ปลด Anchor ทั้งหมด ${anchors.length} จุดใช่หรือไม่?`)) return;
-  const changes = anchors.map((mapping) => ({ mapping, before: snapshotMapping(mapping), after: { ...snapshotMapping(mapping), anchorLocked: false, verified: Boolean(mapping.verified), mappingMethod: mapping.verified ? 'manual-direct' : 'auto-order-guess' } })); applyTransaction('Clear all anchors', changes); toast('ปลด Anchor ทั้งหมดแล้ว');
+  const changes = anchors.map((mapping) => ({ mapping, before: snapshotMapping(mapping), after: { ...snapshotMapping(mapping), anchorLocked: false, verified: Boolean(mapping.verified), mappingMethod: mapping.verified ? 'manual-direct' : 'local-order-guess' } })); applyTransaction('Clear all anchors', changes); toast('ปลด Anchor ทั้งหมดแล้ว');
 }
 function shiftCurrentMappings(delta) {
   const component = currentComponent(); if (!component) return; const start = els.patternStart.value === '' ? -Infinity : Number(els.patternStart.value); const end = els.patternEnd.value === '' ? Infinity : Number(els.patternEnd.value);
-  const moving = currentMappings().filter((m) => Number(m.localIndex) >= Math.min(start, end) && Number(m.localIndex) <= Math.max(start, end)); const movingSet = new Set(moving);
+  const moving = currentMappings().filter((m) => mappingOrder(m) >= Math.min(start, end) && mappingOrder(m) <= Math.max(start, end)); const movingSet = new Set(moving);
   const occupiedOutside = new Set(currentMappings().filter((m) => (!movingSet.has(m) || m.anchorLocked) && m.mapped).map((m) => Number(m.globalId))); const changes = [];
   for (const mapping of moving) {
     if (!mapping.mapped || mapping.anchorLocked || isVerifiedMapping(mapping)) continue; const index = findLandIndex(component, mapping.globalId); const land = component.lands[index + delta]; if (!land || occupiedOutside.has(Number(land.globalId))) continue;
@@ -1562,7 +1624,7 @@ function shiftCurrentMappings(delta) {
 }
 function unmapRange() {
   const start = els.patternStart.value === '' ? -Infinity : Number(els.patternStart.value); const end = els.patternEnd.value === '' ? Infinity : Number(els.patternEnd.value);
-  const targets = currentMappings().filter((m) => Number(m.localIndex) >= Math.min(start, end) && Number(m.localIndex) <= Math.max(start, end) && !m.anchorLocked && m.mapped);
+  const targets = currentMappings().filter((m) => mappingOrder(m) >= Math.min(start, end) && mappingOrder(m) <= Math.max(start, end) && !m.anchorLocked && m.mapped);
   if (!targets.length) return toast('ไม่มีรายการในช่วงที่สามารถ Unmap ได้'); if (!window.confirm(`Unmap ${targets.length} จุดในช่วงนี้ โดยรักษา Anchor ไว้ใช่หรือไม่?`)) return; applyTransaction('Unmap range', targets.map((mapping) => ({ mapping, before: snapshotMapping(mapping), after: stateForUnmapped(mapping) }))); toast(`Unmap แล้ว ${formatInt.format(targets.length)} จุด`);
 }
 
@@ -1697,7 +1759,7 @@ async function generateComponentReport() {
       generatedAt: new Date().toISOString(), zoneGrid: grid, nameSourceLabel, components: reportComponentsData,
     });
     const scopeName = components.length === 1 ? components[0].name : 'raw_parts';
-    downloadBlob(blob, `${reportFileStem(state.xmlData.board?.Name)}_${reportFileStem(scopeName)}_component_report_v0.9.0.xlsx`);
+    downloadBlob(blob, `${reportFileStem(state.xmlData.board?.Name)}_${reportFileStem(scopeName)}_component_report_v0.10.0.xlsx`);
     els.componentReportMessage.textContent = `สร้าง Excel สำเร็จ · ${formatInt.format(components.length)} Component · ${formatInt.format(reportComponentsData.reduce((sum, item) => sum + item.rows.length, 0))} Land`;
     toast('สร้าง Component Report Excel สำเร็จ', 4200);
   } catch (error) {
@@ -1709,21 +1771,21 @@ async function generateComponentReport() {
 
 function exportCsv() {
   const mappings = state.mappingData?.mappings || [];
-  const headers = ['xray_local_land','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','verified','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row'];
+  const headers = ['raw_land_identifier','raw_order','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','verified','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row'];
   const lines = [headers.join(',')];
-  for (const m of mappings) lines.push([m.localIndex, m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.confidence, isVerifiedMapping(m), m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
-  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.9.0.csv`);
+  for (const m of mappings) lines.push([m.rawLandId ?? m.localIndex, m.rawOrder ?? '', m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.confidence, isVerifiedMapping(m), m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
+  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.10.0.csv`);
 }
 function exportJson() {
   const overrides = (state.mappingData?.mappings || [])
     .filter((m) => isVerifiedMapping(m) || m.alias || m.mappingMethod === 'manual-unmapped')
-    .map((m) => ({ sourceRow: m.sourceRow, localIndex: m.localIndex, componentName: m.componentName, componentId: m.componentId, globalId: m.globalId, cadName: m.cadName, alias: m.alias || '', manual: Boolean(m.manual), verified: isVerifiedMapping(m), mapped: Boolean(m.mapped), anchorLocked: Boolean(m.anchorLocked), confidence: m.confidence, mappingMethod: m.mappingMethod }));
+    .map((m) => ({ sourceRow: m.sourceRow, rawOrder: m.rawOrder, rawLandId: m.rawLandId ?? m.localIndex, localIndex: m.localIndex, componentName: m.componentName, componentId: m.componentId, globalId: m.globalId, cadName: m.cadName, alias: m.alias || '', manual: Boolean(m.manual), verified: isVerifiedMapping(m), mapped: Boolean(m.mapped), anchorLocked: Boolean(m.anchorLocked), confidence: m.confidence, mappingMethod: m.mappingMethod }));
   const cadNameOverrides = [...state.cadInspector.renames.entries()].map(([key, cadName]) => {
     const [componentId, globalId] = key.split('\u0000');
     return { componentId, globalId: Number(globalId), cadName };
   });
-  const payload = { app: 'BGA Land Mapper', version: '0.9.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries, safeMapping: true, cadNameRules: { maxLength: state.cadInspector.maxLength, prefix: state.cadInspector.prefix }, cadNameOverrides, overrides };
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.9.0.json');
+  const payload = { app: 'BGA Land Mapper', version: '0.10.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, landMode: state.schema.landMode, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries, safeMapping: true, cadNameRules: { maxLength: state.cadInspector.maxLength, prefix: state.cadInspector.prefix }, cadNameOverrides, overrides };
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.10.0.json');
 }
 function trustedBackupItem(item) {
   const method = String(item?.mappingMethod || '');

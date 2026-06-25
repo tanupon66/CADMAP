@@ -1,5 +1,5 @@
 {
-  "name": "BGA Land Mapper v0.9.0",
+  "name": "BGA Land Mapper v0.10.0",
   "short_name": "Land Mapper",
   "description": "เปิด CAD XML เปรียบเทียบ Original กับ Generated CAD จับคู่ Land ตรวจชื่อซ้ำ Export XML และสร้าง Component Report Excel พร้อมภาพตำแหน่ง",
   "start_url": "./",

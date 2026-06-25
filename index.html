@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
-  <title>BGA Land Mapper v0.9.0</title>
+  <title>BGA Land Mapper v0.10.0</title>
 </head>
 <body>
   <header class="topbar">
@@ -16,7 +16,7 @@
       <img src="./icons/icon.svg" alt="" class="brand-icon" />
       <div>
         <h1>BGA Land Mapper</h1>
-        <p>CAD XML ↔ X-ray Land Location</p>
+        <p>Original CAD ↔ Generated CAD ↔ Raw Data</p>
       </div>
     </div>
     <div class="top-actions">
@@ -62,7 +62,7 @@
         <div class="form-grid">
           <label>Component<select id="componentColumn"></select></label>
           <label>Package<select id="packageColumn"></select></label>
-          <label>Land number<select id="landColumn"></select></label>
+          <label>Land identifier<select id="landColumn"></select></label>
           <label>Measurement<select id="measurementColumn"></select></label>
         </div>
         <button id="remapButton" class="primary full" type="button" disabled>คำนวณ Mapping ใหม่</button>
@@ -71,7 +71,7 @@
       <section class="panel-section stats-section">
         <span class="eyebrow">3. SUMMARY</span>
         <div class="stat-grid">
-          <div class="stat"><span>CAD suggestions</span><strong id="mappedStat">0</strong></div>
+          <div class="stat"><span>Mapped</span><strong id="mappedStat">0</strong></div>
           <div class="stat"><span>Confirmed</span><strong id="verifiedStat">0</strong></div>
           <div class="stat"><span>Unmapped</span><strong id="unmappedStat">0</strong></div>
           <div class="stat"><span>CAD lands shown</span><strong id="xmlLandStat">0</strong></div>
@@ -109,7 +109,7 @@
       <div class="workspace-toolbar panel">
         <div class="search-wrap">
           <span>⌕</span>
-          <input id="searchInput" type="search" placeholder="ค้นหา 17660, XML ID 18572 หรือ CU71" />
+          <input id="searchInput" type="search" placeholder="ค้นหา 17660, L0A0A, XML ID หรือชื่อ CAD" />
           <button id="searchButton" type="button">ค้นหา</button>
         </div>
         <div class="toolbar-actions">
@@ -142,8 +142,8 @@
         </div>
         <div id="manualBanner" class="manual-banner edit-panel hidden">
           <div class="edit-panel-heading"><strong>EDIT MODE</strong><button id="exitEditButton" class="edit-close" type="button" aria-label="ออกจากโหมด Edit">✕</button></div>
-          <span id="editCurrentLabel">เลือก X-ray Land จากตารางหรือค้นหา</span>
-          <small>จากนั้นคลิกตำแหน่ง CAD บนกราฟิกเพื่อยืนยันจุดนั้นทันที</small>
+          <span id="editCurrentLabel">เลือกรายการจากข้อมูลดิบในตารางหรือค้นหา</span>
+          <small>จากนั้นคลิกตำแหน่ง CAD บนกราฟิกเพื่อยืนยันคู่ Mapping ทันที</small>
           <div class="edit-panel-actions">
             <button id="editPrevButton" type="button">← ก่อนหน้า</button>
             <button id="editNextButton" type="button">ถัดไป →</button>
@@ -175,7 +175,7 @@
         </div>
         <div class="table-scroll">
           <table>
-            <thead><tr><th>X-ray Land</th><th>XML ID</th><th>CAD Name</th><th>X</th><th>Y</th><th>Measurement</th><th>Confidence</th><th>Status</th></tr></thead>
+            <thead><tr><th>Raw identifier</th><th>XML ID</th><th>CAD Name</th><th>X</th><th>Y</th><th>Measurement</th><th>Confidence</th><th>Status</th></tr></thead>
             <tbody id="mappingTableBody"></tbody>
           </table>
         </div>
@@ -189,7 +189,7 @@
         <p id="selectedSubTitle">ค้นหาหรือคลิกตำแหน่งบนกราฟิก</p>
       </section>
       <section class="panel-section detail-grid" id="detailGrid">
-        <div><span>X-ray local</span><strong id="dLocal">—</strong></div>
+        <div><span>Raw identifier</span><strong id="dLocal">—</strong></div>
         <div><span>XML global ID</span><strong id="dGlobal">—</strong></div>
         <div><span>CAD name</span><strong id="dCad">—</strong></div>
         <div><span>Component</span><strong id="dComponent">—</strong></div>

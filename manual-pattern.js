@@ -59,6 +59,16 @@ export function stateForUnmapped(mapping, options = {}) {
   };
 }
 
+
+function sequenceIndex(mapping) {
+  const value = Number(mapping?.rawOrder ?? mapping?.sourceRow ?? mapping?.localIndex);
+  return Number.isFinite(value) ? value : null;
+}
+
+function rawLabel(mapping) {
+  return String(mapping?.rawLandId ?? mapping?.localIndex ?? sequenceIndex(mapping) ?? '—');
+}
+
 function landIndexByGlobalId(component) {
   const map = new Map();
   component.lands.forEach((land, index) => map.set(Number(land.globalId), index));
@@ -66,7 +76,7 @@ function landIndexByGlobalId(component) {
 }
 
 function normalizeRange(mappings, startLocal, endLocal) {
-  const locals = mappings.map((m) => Number(m.localIndex)).filter(Number.isFinite);
+  const locals = mappings.map(sequenceIndex).filter(Number.isFinite);
   const minimum = locals.length ? Math.min(...locals) : 1;
   const maximum = locals.length ? Math.max(...locals) : 1;
   const hasStart = startLocal !== null && startLocal !== undefined && startLocal !== '' && Number.isFinite(Number(startLocal));
@@ -91,14 +101,14 @@ export function createSequencePreview({ mappings, component, direction = 'auto',
   if (Number(userShift || 0) !== 0) return { ok: false, error: 'Safe Pattern ไม่อนุญาต Shift เพราะจะทำให้ Anchor ไม่ตรง กรุณาแก้ด้วย Edit Mode' };
 
   const componentMappings = mappings
-    .filter((m) => Number.isFinite(Number(m.localIndex)))
-    .sort((a, b) => Number(a.localIndex) - Number(b.localIndex));
+    .filter((m) => Number.isFinite(sequenceIndex(m)))
+    .sort((a, b) => sequenceIndex(a) - sequenceIndex(b));
   if (!componentMappings.length) return { ok: false, error: 'ไม่พบรายการ X-ray Land ใน Component นี้' };
 
   const indexByGlobal = landIndexByGlobalId(component);
   const anchors = componentMappings
     .filter((mapping) => mapping.anchorLocked && mapping.mapped && indexByGlobal.has(Number(mapping.globalId)))
-    .map((mapping) => ({ mapping, localIndex: Number(mapping.localIndex), cadIndex: indexByGlobal.get(Number(mapping.globalId)) }))
+    .map((mapping) => ({ mapping, localIndex: sequenceIndex(mapping), rawLabel: rawLabel(mapping), cadIndex: indexByGlobal.get(Number(mapping.globalId)) }))
     .sort((a, b) => a.localIndex - b.localIndex);
   if (anchors.length < 2) return { ok: false, error: 'Safe Pattern ต้องใช้ Anchor ที่ยืนยันแล้วอย่างน้อย 2 จุด' };
 
@@ -111,20 +121,20 @@ export function createSequencePreview({ mappings, component, direction = 'auto',
     const localDelta = b.localIndex - a.localIndex;
     const cadDelta = b.cadIndex - a.cadIndex;
     if (localDelta <= 0 || Math.abs(cadDelta) !== localDelta) {
-      rejectedSegments.push({ a, b, reason: `ช่วง ${a.localIndex}–${b.localIndex} ไม่ใช่ลำดับ CAD ต่อเนื่อง` });
+      rejectedSegments.push({ a, b, reason: `ช่วงลำดับ ${a.localIndex}–${b.localIndex} (${a.rawLabel} → ${b.rawLabel}) ไม่ใช่ลำดับ CAD ต่อเนื่อง` });
       continue;
     }
     const step = Math.sign(cadDelta);
     const segmentDirection = directionName(step);
     if (direction !== 'auto' && direction !== segmentDirection) {
-      rejectedSegments.push({ a, b, reason: `ช่วง ${a.localIndex}–${b.localIndex} เป็น ${segmentDirection} ไม่ตรงกับค่าที่เลือก` });
+      rejectedSegments.push({ a, b, reason: `ช่วง ${a.rawLabel} → ${b.rawLabel} เป็น ${segmentDirection} ไม่ตรงกับค่าที่เลือก` });
       continue;
     }
     segments.push({ a, b, step, direction: segmentDirection });
   }
   if (!segments.length) return { ok: false, error: 'Anchor ยังไม่พิสูจน์ลำดับต่อเนื่อง ไม่มีช่วงที่ปลอดภัยให้เติมอัตโนมัติ' };
 
-  const mappingByLocal = new Map(componentMappings.map((mapping) => [Number(mapping.localIndex), mapping]));
+  const mappingByLocal = new Map(componentMappings.map((mapping) => [sequenceIndex(mapping), mapping]));
   const verifiedTargetOwners = new Map();
   for (const mapping of componentMappings) {
     if ((mapping.verified || mapping.anchorLocked) && mapping.mapped && indexByGlobal.has(Number(mapping.globalId))) {
@@ -149,7 +159,7 @@ export function createSequencePreview({ mappings, component, direction = 'auto',
       const verifiedOwner = verifiedTargetOwners.get(targetIndex);
       if (verifiedOwner && verifiedOwner !== mapping) {
         status = 'conflict';
-        reason = `ชนกับจุดยืนยัน X-ray ${verifiedOwner.localIndex}`;
+        reason = `ชนกับจุดยืนยัน ${rawLabel(verifiedOwner)}`;
         conflicts += 1;
       }
 
@@ -210,8 +220,8 @@ export function findLandIndex(component, globalId) {
 
 export function getAnchorRange(mappings) {
   const locals = mappings
-    .filter((m) => m.anchorLocked && Number.isFinite(Number(m.localIndex)))
-    .map((m) => Number(m.localIndex))
+    .filter((m) => m.anchorLocked && Number.isFinite(sequenceIndex(m)))
+    .map(sequenceIndex)
     .sort((a, b) => a - b);
   return locals.length < 2 ? null : { start: locals[0], end: locals[locals.length - 1] };
 }

@@ -1,57 +1,64 @@
-# BGA Land Mapper PWA v0.9.0
+# BGA Land Mapper v0.10.0
 
-PWA แบบ Static สำหรับเปิด CAD XML, เปรียบเทียบ Original CAD กับ Generated CAD, จับคู่ Land, ตรวจชื่อ CAD, วิเคราะห์ Measurement และสร้างรายงาน Excel พร้อมภาพตำแหน่ง Component ภายในเบราว์เซอร์
+PWA แบบ Static สำหรับเปิด CAD XML, เปรียบเทียบ Original/Generated CAD, จับคู่ข้อมูลดิบ XLSX และแสดงตำแหน่ง Land บนกราฟิก โดยประมวลผลในเบราว์เซอร์ทั้งหมด
 
-## ฟังก์ชันใหม่ v0.9.0 — Component Report Excel
+## สิ่งที่แก้ใน v0.10.0
 
-กด **Component Excel** หลังนำเข้า CAD โปรแกรมสามารถสร้างไฟล์ `.xlsx` โดยไม่ต้องส่งข้อมูลขึ้นเซิร์ฟเวอร์
+### Land identifier ไม่บังคับเป็นตัวเลข
 
-### ขอบเขตรายงาน
+คอลัมน์ Land สามารถเป็นได้ทั้ง:
 
-- เฉพาะ Component ที่กำลังแสดง
-- ทุก Part ที่พบในข้อมูลดิบ XLSX
-- ใช้งานได้เมื่อเปิด CAD XML เพียงไฟล์เดียว แม้ยังไม่มีข้อมูล X-ray
+- ลำดับภายใน Part เช่น `1, 2, 3`
+- XML global Land ID เช่น `15351`
+- ชื่อ CAD แบบตัวอักษร/ตัวเลข เช่น `CU71`, `L0A0A`
 
-### ตัวเลือกรายงาน
+ระบบจะตรวจชนิดคอลัมน์อัตโนมัติและแสดงโหมดที่ใช้:
 
-- แบ่งภาพ Component เป็น 2×2, 3×3 หรือ 4×4 โซน
-- เลือกข้อความบนภาพขยาย: ชื่อ CAD, หมายเลข X-ray Land, ทั้งสองอย่าง หรือไม่แสดงข้อความ
-- เลือกชื่อจาก CAD ที่กำลังดู, Original CAD หรือ Generated CAD
-- เลือกความละเอียดภาพ Standard, Detail หรือ High Detail
-- เปิด/ปิด Measurement Heatmap
+- `local-index`
+- `global-id`
+- `cad-name`
+- `auto`
 
-### ชีตที่สร้าง
+ผู้ใช้สามารถเปลี่ยนคอลัมน์ `Land identifier` เองแล้วกดคำนวณ Mapping ใหม่ได้
 
-- `Summary` — สรุป Board, CAD, X-ray และลิงก์ไปยังชีตแต่ละ Component
-- `Map <Part>` — ภาพรวม Component ตามพิกัด CAD พร้อมเส้นแบ่งโซน
-- `Data <Part>` — ตารางข้อมูล Land ทุกจุด
-- `<Part> Zone A1...` — ภาพขยายแต่ละโซนและข้อมูล Land ภายในโซน
-- `Histogram <Part>` — ภาพ Histogram, สถิติ และข้อมูลแต่ละ Bin
-- `CAD Name Changes` — ตารางชื่อ Original ↔ Generated เมื่อชื่อแตกต่างกัน
-- `Duplicate Names` — รายการตำแหน่งที่ชื่อ CAD ซ้ำ
+### Mapping ด้วยข้อมูลสองชุดใดก็ได้
 
-ตาราง Land ประกอบด้วย Part, Package, Zone, Local index, X-ray Land, XML ID, ชื่อ CAD, ชื่อ Original, ชื่อ Generated, พิกัด X/Y, ขนาด, Measurement, Confirmed และสถานะ Mapping
+รองรับคู่หลักต่อไปนี้โดยไม่ต้องรอไฟล์ที่สาม:
 
-### การนำทางใน Excel
+1. Original CAD ↔ Generated CAD
+2. Original CAD ↔ Raw XLSX
+3. Generated CAD ↔ Raw XLSX
 
-- คลิกชื่อ Map/Data ใน Summary เพื่อไปยังชีตนั้น
-- คลิก Zone ใน `Data <Part>` เพื่อเปิดภาพขยายของโซน
-- คลิกชื่อชีต Zone ในหน้า Map เพื่อดูบริเวณนั้นโดยตรง
+เมื่อมีครบสามชุด ระบบสามารถใช้ชื่อจาก CAD อีกฝั่งเป็นสะพาน เช่น Raw XLSX ใช้ชื่อ Generated CAD แต่กำลังแสดง Original CAD ระบบจะหา Generated Land จากชื่อแล้วส่งต่อด้วย XML ID/พิกัดมายัง Original Land
 
-## ฟังก์ชันเดิม
+### ระดับความน่าเชื่อถือ
 
-- เปิด CAD XML อย่างเดียวและแสดงกราฟิกทันที
-- อัปโหลด Original CAD และ Generated CAD แยกกัน
-- เปรียบเทียบชื่อ พิกัด Land ที่หายและ Land ที่เกิน
-- CAD Name Inspector สำหรับชื่อซ้ำ ชื่อว่าง และชื่อเกิน 5 ตัวอักษร
-- Export CAD XML ฉบับแก้ไขโดยรักษาข้อมูลอื่นไว้
-- Measurement Histogram แบบละเอียด
-- แสดงชื่อ CAD ซ้ำบนกราฟิก
-- Fast Edit Mode และ Safe Pattern
-- Backup/Restore JSON
-- Export Mapping CSV
-- PWA Offline บน GitHub Pages
+- `Name match` — ชื่อตรงกับ CAD ที่กำลังแสดง
+- `CAD bridge` — ชื่อตรงกับ CAD อีกฝั่งและเชื่อมกลับด้วย XML ID/พิกัด
+- `XML ID match` — ตรงกับ global Land ID
+- `Unverified` — ใช้ลำดับภายใน Part เป็นข้อเสนอ
+- `Ambiguous` — ชื่อซ้ำจนยังระบุตำแหน่งเดียวไม่ได้
+- `Unmapped` — ไม่พบคู่
 
-## Deploy บน GitHub Pages
+## ผลตรวจ test2.xlsx
 
-อัปโหลดไฟล์ภายในโฟลเดอร์นี้ไปยัง root ของ repository แล้วเปิด GitHub Pages จาก branch `main` และโฟลเดอร์ `/ (root)` ไม่ต้อง build หรือ `npm install`
+- แถวข้อมูล: 12,448
+- Component: U1
+- Auto detect เลือกคอลัมน์ M
+- โหมด: `global-id`
+- Mapped: 12,448
+- XML ID verified: 11,722
+- Local-order suggestions: 726
+- Unmapped: 0
+
+คอลัมน์ N มีค่าข้อความ เช่น `L0A0A` และสามารถเลือกเป็น Land identifier ได้ หากชื่อเหล่านี้ตรงกับ Generated CAD ระบบจะจับคู่ด้วยชื่อโดยตรง
+
+## การเปิด CAD อย่างเดียว
+
+อัปโหลด Original CAD หรือ Generated CAD เพียงไฟล์เดียว โปรแกรมจะแสดง CAD ทันทีโดยไม่ต้องมี XLSX
+
+## การใช้งานบน GitHub Pages
+
+นำไฟล์ทั้งหมดในโฟลเดอร์นี้ไปไว้ที่ Root ของ Repository แล้วเปิด GitHub Pages จาก branch `main` / root
+
+ไม่ต้องใช้ npm build และไม่ต้องมี Backend
