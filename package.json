@@ -1,6 +1,6 @@
 {
   "name": "bga-land-mapper",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "test:parser": "node tests/test-parsers.mjs",
     "test:parts": "node tests/test-raw-part-filter.mjs",
     "test:static": "node tests/test-static.mjs",
-    "test:duplicates": "node tests/test-duplicates.mjs"
+    "test:duplicates": "node tests/test-duplicates.mjs",
+    "test:safe-edit": "node tests/test-safe-edit-static.mjs"
   }
 }

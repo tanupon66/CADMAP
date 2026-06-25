@@ -24,16 +24,17 @@ const els = {
   progressWrap: $('progressWrap'), projectStatus: $('projectStatus'),
   componentColumn: $('componentColumn'), packageColumn: $('packageColumn'), landColumn: $('landColumn'),
   measurementColumn: $('measurementColumn'), remapButton: $('remapButton'),
-  mappedStat: $('mappedStat'), unmappedStat: $('unmappedStat'), xmlLandStat: $('xmlLandStat'), componentStat: $('componentStat'),
+  mappedStat: $('mappedStat'), verifiedStat: $('verifiedStat'), unmappedStat: $('unmappedStat'), xmlLandStat: $('xmlLandStat'), componentStat: $('componentStat'),
   mappingFormula: $('mappingFormula'), componentSelect: $('componentSelect'), heatmapToggle: $('heatmapToggle'), labelToggle: $('labelToggle'),
   duplicateToggle: $('duplicateToggle'), duplicateOnlyToggle: $('duplicateOnlyToggle'), duplicateNameSelect: $('duplicateNameSelect'), duplicateSummaryMini: $('duplicateSummaryMini'),
   fitButton: $('fitButton'), zoomInButton: $('zoomInButton'), zoomOutButton: $('zoomOutButton'),
   searchInput: $('searchInput'), searchButton: $('searchButton'), manualButton: $('manualButton'), teachButton: $('teachButton'),
   undoButton: $('undoButton'), redoButton: $('redoButton'), exportCsvButton: $('exportCsvButton'), exportJsonButton: $('exportJsonButton'),
   canvas: $('cadCanvas'), viewerTitle: $('viewerTitle'), viewerSubtitle: $('viewerSubtitle'), tooltip: $('tooltip'), manualBanner: $('manualBanner'),
+  editCurrentLabel: $('editCurrentLabel'), exitEditButton: $('exitEditButton'), editPrevButton: $('editPrevButton'), editNextButton: $('editNextButton'), editAutoNext: $('editAutoNext'), editLockConfirmed: $('editLockConfirmed'),
   tableFilter: $('tableFilter'), mappingTableBody: $('mappingTableBody'), tableSummary: $('tableSummary'), prevPage: $('prevPage'), nextPage: $('nextPage'), pageLabel: $('pageLabel'),
   selectedTitle: $('selectedTitle'), selectedSubTitle: $('selectedSubTitle'), dLocal: $('dLocal'), dGlobal: $('dGlobal'), dCad: $('dCad'), dComponent: $('dComponent'),
-  dX: $('dX'), dY: $('dY'), dMeasurement: $('dMeasurement'), dConfidence: $('dConfidence'), dRow: $('dRow'), dMethod: $('dMethod'), dAnchor: $('dAnchor'),
+  dX: $('dX'), dY: $('dY'), dMeasurement: $('dMeasurement'), dConfidence: $('dConfidence'), dRow: $('dRow'), dMethod: $('dMethod'), dVerified: $('dVerified'), dAnchor: $('dAnchor'),
   measurementHistogram: $('measurementHistogram'), histogramBins: $('histogramBins'), histogramMessage: $('histogramMessage'), expandHistogramButton: $('expandHistogramButton'),
   histCount: $('histCount'), histMin: $('histMin'), histAverage: $('histAverage'), histMedian: $('histMedian'), histMax: $('histMax'),
   histogramOverlay: $('histogramOverlay'), closeHistogramButton: $('closeHistogramButton'), detailedHistogramPart: $('detailedHistogramPart'),
@@ -60,6 +61,7 @@ const els = {
 const state = {
   xmlText: null, xlsxBuffer: null, xmlData: null, xlsxData: null, schema: null, mappingData: null,
   selectedComponentId: null, selected: null, hoveredLand: null, manualMode: false, preview: null,
+  edit: { enabled: false, autoNext: true, lockConfirmed: true },
   undoStack: [], redoStack: [], page: 1, pageSize: 80, filter: 'all',
   view: { scale: 1, offsetX: 0, offsetY: 0 }, dragging: false, lastPointer: null, dragStart: null,
   fileNames: { xml: '', xlsx: '' }, installPrompt: null,
@@ -72,6 +74,46 @@ const histogramCtx = els.measurementHistogram.getContext('2d');
 const detailedHistogramCtx = els.detailedHistogramCanvas.getContext('2d');
 const formatInt = new Intl.NumberFormat('th-TH');
 const formatFloat = new Intl.NumberFormat('th-TH', { maximumFractionDigits: 4 });
+
+
+function isVerifiedMapping(mapping) {
+  if (!mapping) return false;
+  return Boolean(mapping.verified || (mapping.anchorLocked && mapping.manual && ['manual-anchor', 'manual-direct', 'restored-confirmed'].includes(String(mapping.mappingMethod || ''))));
+}
+function isUnsafeGeneratedMapping(mapping) {
+  const method = String(mapping?.mappingMethod || '');
+  return method.startsWith('taught-') || method === 'manual-swap' || method === 'pattern-suggestion';
+}
+function updateEditPanel() {
+  const enabled = Boolean(state.edit.enabled);
+  state.manualMode = enabled;
+  els.manualBanner.classList.toggle('hidden', !enabled);
+  els.manualButton.classList.toggle('edit-active', enabled);
+  els.manualButton.textContent = enabled ? 'ออกจาก Edit' : 'โหมด Edit';
+  els.editAutoNext.checked = state.edit.autoNext;
+  els.editLockConfirmed.checked = state.edit.lockConfirmed;
+  const mapping = state.selected;
+  els.editCurrentLabel.textContent = mapping
+    ? `กำลังแก้ X-ray ${mapping.localIndex} · ปัจจุบัน ${mapping.cadName || 'Unmapped'}`
+    : 'เลือก X-ray Land จากตารางหรือค้นหา';
+  els.editPrevButton.disabled = !enabled || !mapping;
+  els.editNextButton.disabled = !enabled || !mapping;
+  els.canvas.style.cursor = enabled ? 'crosshair' : '';
+  if (enabled) els.manualBanner.classList.remove('preview-active');
+}
+function setEditMode(enabled) {
+  state.edit.enabled = Boolean(enabled);
+  updateEditPanel();
+  draw();
+}
+function advanceSelected(delta) {
+  const mappings = currentMappings().slice().sort((a, b) => Number(a.localIndex) - Number(b.localIndex));
+  if (!mappings.length) return;
+  let index = state.selected ? mappings.indexOf(state.selected) : -1;
+  index = Math.max(0, Math.min(mappings.length - 1, index + delta));
+  selectMapping(mappings[index], false);
+  updateEditPanel();
+}
 
 function toast(message, timeout = 2800) {
   els.toast.textContent = message;
@@ -189,8 +231,10 @@ function renderDuplicatePanel() {
 function normalizeMappings() {
   for (const mapping of state.mappingData?.mappings || []) {
     if (mapping.anchorLocked == null) mapping.anchorLocked = false;
-    if (!mapping.mappingMethod) mapping.mappingMethod = mapping.mapped ? 'auto-sequence' : 'unmapped';
+    if (!mapping.mappingMethod) mapping.mappingMethod = mapping.mapped ? 'auto-order-guess' : 'unmapped';
     if (mapping.alias == null) mapping.alias = '';
+    mapping.verified = isVerifiedMapping(mapping);
+    if (!mapping.verified && mapping.mapped && !mapping.mappingMethod) mapping.mappingMethod = 'auto-order-guess';
   }
   recomputeStats();
 }
@@ -200,6 +244,8 @@ function recomputeStats() {
   state.mappingData.stats = {
     total: mappings.length,
     mapped: mappings.filter((m) => m.mapped).length,
+    verified: mappings.filter(isVerifiedMapping).length,
+    unverified: mappings.filter((m) => m.mapped && !isVerifiedMapping(m)).length,
     unmapped: mappings.filter((m) => !m.mapped).length,
     duplicateCadNames: mappings.filter((m) => m.duplicateCadNameCount > 1).length,
     manual: mappings.filter((m) => m.manual).length,
@@ -241,7 +287,7 @@ function refreshAfterEdit() {
     els.manualBanner.classList.add('hidden');
     els.manualBanner.classList.remove('preview-active');
   }
-  recomputeStats(); updateStats(); updateDetails(); renderTable(); renderTeachPanel(); renderDuplicatePanel(); draw(); renderHistogram(); refreshHistoryButtons();
+  recomputeStats(); updateStats(); updateDetails(); updateEditPanel(); renderTable(); renderTeachPanel(); renderDuplicatePanel(); draw(); renderHistogram(); refreshHistoryButtons();
 }
 
 function columnOptionLabel(descriptor) {
@@ -302,6 +348,7 @@ function populateComponents(preferredId = null) {
 function updateStats() {
   const stats = state.mappingData?.stats;
   els.mappedStat.textContent = formatInt.format(stats?.mapped || 0);
+  els.verifiedStat.textContent = formatInt.format(stats?.verified || 0);
   els.unmappedStat.textContent = formatInt.format(stats?.unmapped || 0);
   const summaries = state.mappingData?.componentSummaries || [];
   const shownComponentIds = [...new Set(summaries.filter((item) => item.componentId != null).map((item) => String(item.componentId)))];
@@ -311,17 +358,15 @@ function updateStats() {
   const summary = state.mappingData?.componentSummaries.find((item) => String(item.componentId) === String(state.selectedComponentId)) || state.mappingData?.componentSummaries[0];
   const anchors = currentMappings().filter((mapping) => mapping.anchorLocked).length;
   if (summary?.countMatch) {
-    els.mappingFormula.innerHTML = summary.contiguous
-      ? `Component ${summary.componentName}: XML ID = X-ray Land + ${formatInt.format(summary.offset)}<br>Manual anchors ปัจจุบัน ${formatInt.format(anchors)} จุด`
-      : `Component ${summary.componentName}: ใช้ลำดับ XML global ID · Manual anchors ${formatInt.format(anchors)} จุด`;
-  } else if (summary) els.mappingFormula.textContent = `จำนวนไม่ตรงกัน: X-ray ${summary.xrayCount} / XML ${summary.xmlCount} · ควรใช้ Manual Teach ตรวจสอบ`;
+    els.mappingFormula.innerHTML = `Component ${summary.componentName}: พบจำนวน Land ตรงกัน แต่ลำดับ XML เป็นเพียง Auto guess<br>Confirmed ${formatInt.format(stats?.verified || 0)} จุด · Anchor ${formatInt.format(anchors)} จุด`;
+  } else if (summary) els.mappingFormula.textContent = `จำนวนไม่ตรงกัน: X-ray ${summary.xrayCount} / XML ${summary.xmlCount} · ต้องยืนยันด้วย Edit Mode`;
   else els.mappingFormula.textContent = 'ยังไม่มีสูตร Mapping';
   const ready = Boolean(state.xmlData && state.xlsxData && state.mappingData);
-  els.projectStatus.textContent = ready ? `พร้อม · ${formatInt.format(stats.mapped)} mapped · ${formatInt.format(stats.anchors || 0)} anchors` : state.xmlData ? 'เปิด XML แล้ว' : 'ยังไม่ได้เปิดโปรเจกต์';
+  els.projectStatus.textContent = ready ? `พร้อม · ${formatInt.format(stats.verified || 0)} confirmed · ${formatInt.format(stats.unverified || 0)} unverified` : state.xmlData ? 'เปิด XML แล้ว' : 'ยังไม่ได้เปิดโปรเจกต์';
   els.projectStatus.className = `status-pill ${ready ? 'ready' : 'muted'}`;
   els.remapButton.disabled = !state.xmlData || !state.xlsxData;
   els.exportCsvButton.disabled = !ready; els.exportJsonButton.disabled = !ready; els.restoreButton.disabled = !ready; els.teachButton.disabled = !ready;
-  els.manualButton.disabled = !state.selected; refreshHistoryButtons();
+  els.manualButton.disabled = !ready; refreshHistoryButtons();
 }
 function runMapping() {
   if (!state.xmlData || !state.xlsxData) return;
@@ -358,33 +403,33 @@ async function processFile(file) {
   finally { setLoading(false); els.projectFile.value = ''; }
 }
 function resetProject() {
-  Object.assign(state, { xmlText: null, xlsxBuffer: null, xmlData: null, xlsxData: null, schema: null, mappingData: null, selectedComponentId: null, selected: null, hoveredLand: null, manualMode: false, preview: null, undoStack: [], redoStack: [], page: 1, fileNames: { xml: '', xlsx: '' }, view: { scale: 1, offsetX: 0, offsetY: 0 }, dragStart: null, duplicateView: { enabled: true, dimOthers: false, selectedName: '' } });
+  Object.assign(state, { xmlText: null, xlsxBuffer: null, xmlData: null, xlsxData: null, schema: null, mappingData: null, selectedComponentId: null, selected: null, hoveredLand: null, manualMode: false, preview: null, edit: { enabled: false, autoNext: true, lockConfirmed: true }, undoStack: [], redoStack: [], page: 1, fileNames: { xml: '', xlsx: '' }, view: { scale: 1, offsetX: 0, offsetY: 0 }, dragStart: null, duplicateView: { enabled: true, dimOthers: false, selectedName: '' } });
   resetHistogramState(); els.histogramOverlay.classList.add('hidden'); els.duplicateToggle.checked = true; els.duplicateOnlyToggle.checked = false;
   els.xmlFileName.textContent = '—'; els.xlsxFileName.textContent = '—'; els.importMessage.textContent = 'ไฟล์จะถูกประมวลผลในเครื่อง ไม่อัปโหลดไปยังเซิร์ฟเวอร์';
   for (const select of [els.componentColumn, els.packageColumn, els.landColumn, els.measurementColumn, els.componentSelect]) select.innerHTML = '';
-  els.mappingTableBody.innerHTML = ''; els.teachOverlay.classList.add('hidden'); clearDetails(); refreshDuplicateControls(); renderTeachPanel(); updateStats(); draw(); renderHistogram();
+  els.mappingTableBody.innerHTML = ''; els.teachOverlay.classList.add('hidden'); clearDetails(); refreshDuplicateControls(); renderTeachPanel(); updateEditPanel(); updateStats(); draw(); renderHistogram();
 }
 function filteredMappings() {
   const mappings = currentMappings();
   switch (state.filter) {
     case 'duplicate': return mappings.filter((m) => m.duplicateCadNameCount > 1);
-    case 'manual': return mappings.filter((m) => m.manual || m.anchorLocked);
+    case 'verified': return mappings.filter(isVerifiedMapping);
+    case 'unverified': return mappings.filter((m) => m.mapped && !isVerifiedMapping(m));
     case 'unmapped': return mappings.filter((m) => !m.mapped);
     default: return mappings;
   }
 }
 function mappingStatus(mapping) {
   if (!mapping.mapped) return { text: 'Unmapped', cls: 'unmapped' };
-  if (mapping.anchorLocked) return { text: 'Anchor', cls: 'anchor' };
-  if (mapping.manual) return { text: 'Manual', cls: 'manual' };
-  return { text: 'Auto', cls: 'auto' };
+  if (isVerifiedMapping(mapping)) return { text: mapping.anchorLocked ? 'Confirmed' : 'Verified', cls: 'verified' };
+  return { text: 'Unverified', cls: 'unverified' };
 }
 function renderTable() {
   const all = filteredMappings(); const pages = Math.max(1, Math.ceil(all.length / state.pageSize)); state.page = Math.min(Math.max(1, state.page), pages);
   const start = (state.page - 1) * state.pageSize; const rows = all.slice(start, start + state.pageSize);
   const previewMappings = new Set(state.preview?.proposals.map((p) => p.mapping) || []); els.mappingTableBody.innerHTML = ''; const fragment = document.createDocumentFragment();
   for (const mapping of rows) {
-    const tr = document.createElement('tr'); if (state.selected === mapping) tr.classList.add('active'); if (mapping.anchorLocked) tr.classList.add('anchor-row'); if (previewMappings.has(mapping)) tr.classList.add('preview-row');
+    const tr = document.createElement('tr'); if (state.selected === mapping) tr.classList.add('active'); if (isVerifiedMapping(mapping)) tr.classList.add('verified-row'); else if (mapping.mapped) tr.classList.add('unverified-row'); if (previewMappings.has(mapping)) tr.classList.add('preview-row');
     const values = [mapping.localIndex, mapping.globalId, mapping.alias || mapping.cadName || 'Unmapped', Number.isFinite(mapping.centerX) ? formatFloat.format(mapping.centerX) : '—', Number.isFinite(mapping.centerY) ? formatFloat.format(mapping.centerY) : '—', mapping.measurement ?? '—', `${mapping.confidence ?? 0}%`];
     for (const value of values) { const td = document.createElement('td'); td.textContent = value; tr.append(td); }
     const status = mappingStatus(mapping); const statusTd = document.createElement('td'); const chip = document.createElement('span'); chip.className = `status-chip ${status.cls}`; chip.textContent = status.text; statusTd.append(chip); tr.append(statusTd);
@@ -393,16 +438,17 @@ function renderTable() {
   els.mappingTableBody.append(fragment); els.tableSummary.textContent = `${formatInt.format(all.length)} รายการ`; els.pageLabel.textContent = `${state.page} / ${pages}`; els.prevPage.disabled = state.page <= 1; els.nextPage.disabled = state.page >= pages;
 }
 function selectMapping(mapping, center = false) {
-  state.selected = mapping; state.manualMode = false; els.manualBanner.classList.add('hidden'); els.manualBanner.classList.remove('preview-active'); els.manualButton.textContent = 'เลือก CAD ใหม่';
+  state.selected = mapping; if (!state.edit.enabled) { state.manualMode = false; els.manualBanner.classList.add('hidden'); els.manualBanner.classList.remove('preview-active'); }
   if (mapping.componentId != null && String(mapping.componentId) !== String(state.selectedComponentId)) { state.selectedComponentId = String(mapping.componentId); els.componentSelect.value = String(mapping.componentId); state.duplicateView.selectedName = ''; refreshDuplicateControls(); fitView(); }
   if (mapping.duplicateCadNameCount > 1 && mapping.cadName) { state.duplicateView.selectedName = String(mapping.cadName).trim(); els.duplicateNameSelect.value = state.duplicateView.selectedName; }
-  updateDetails(); renderDuplicatePanel(); renderTable(); if (center && Number.isFinite(mapping.centerX) && Number.isFinite(mapping.centerY)) centerOn(mapping.centerX, mapping.centerY); draw(); renderHistogram();
+  updateDetails(); updateEditPanel(); renderDuplicatePanel(); renderTable(); if (center && Number.isFinite(mapping.centerX) && Number.isFinite(mapping.centerY)) centerOn(mapping.centerX, mapping.centerY); draw(); renderHistogram();
 }
 function clearDetails() {
   state.selected = null; els.selectedTitle.textContent = 'ยังไม่ได้เลือก'; els.selectedSubTitle.textContent = 'ค้นหาหรือคลิกตำแหน่งบนกราฟิก';
-  for (const el of [els.dLocal, els.dGlobal, els.dCad, els.dComponent, els.dX, els.dY, els.dMeasurement, els.dConfidence, els.dRow, els.dMethod, els.dAnchor]) el.textContent = '—';
+  for (const el of [els.dLocal, els.dGlobal, els.dCad, els.dComponent, els.dX, els.dY, els.dMeasurement, els.dConfidence, els.dRow, els.dMethod, els.dVerified, els.dAnchor]) el.textContent = '—';
   els.rawData.textContent = '—'; els.aliasInput.value = ''; els.aliasInput.disabled = true; els.saveAliasButton.disabled = true; els.copyRawButton.disabled = true; els.duplicateWarning.classList.add('hidden');
-  for (const button of [els.manualButton, els.anchorButton, els.unmapButton, els.nudgePrevButton, els.nudgeNextButton]) button.disabled = true;
+  for (const button of [els.anchorButton, els.unmapButton, els.nudgePrevButton, els.nudgeNextButton]) button.disabled = true;
+  updateEditPanel();
 }
 function updateDetails() {
   const mapping = state.selected; if (!mapping) return clearDetails();
@@ -410,7 +456,7 @@ function updateDetails() {
   els.dLocal.textContent = mapping.localIndex ?? '—'; els.dGlobal.textContent = mapping.globalId ?? '—'; els.dCad.textContent = mapping.cadName || '—'; els.dComponent.textContent = mapping.componentName || '—';
   els.dX.textContent = Number.isFinite(mapping.centerX) ? `${formatFloat.format(mapping.centerX)} mm` : '—'; els.dY.textContent = Number.isFinite(mapping.centerY) ? `${formatFloat.format(mapping.centerY)} mm` : '—';
   els.dMeasurement.textContent = mapping.measurement ?? '—'; els.dConfidence.textContent = `${mapping.confidence ?? 0}%${mapping.manual ? ' · manual' : ''}`; els.dRow.textContent = mapping.sourceRow ?? '—';
-  els.dMethod.textContent = mapping.mappingMethod || (mapping.manual ? 'manual' : 'auto'); els.dAnchor.textContent = mapping.anchorLocked ? 'ล็อกแล้ว' : 'ไม่ล็อก';
+  els.dMethod.textContent = mapping.mappingMethod || (mapping.manual ? 'manual' : 'auto'); els.dVerified.textContent = isVerifiedMapping(mapping) ? 'ยืนยันแล้ว' : 'ยังไม่ยืนยัน'; els.dAnchor.textContent = mapping.anchorLocked ? 'ล็อกแล้ว' : 'ไม่ล็อก';
   els.aliasInput.disabled = false; els.saveAliasButton.disabled = false; els.copyRawButton.disabled = !mapping.raw; els.aliasInput.value = mapping.alias || '';
   els.rawData.textContent = mapping.raw ? mapping.raw.map((value, index) => `${columnName(index)}: ${value ?? ''}`).join('\n') : JSON.stringify(mapping, null, 2);
   if (mapping.duplicateCadNameCount > 1) { state.duplicateView.selectedName = String(mapping.cadName || '').trim(); els.duplicateNameSelect.value = state.duplicateView.selectedName; els.duplicateWarning.textContent = `ชื่อ CAD ${mapping.cadName} พบซ้ำ ${mapping.duplicateCadNameCount} ตำแหน่ง ระบบไฮไลต์ทุกตำแหน่งบนกราฟิกและเชื่อมด้วยเส้นประ`; els.duplicateWarning.classList.remove('hidden'); }
@@ -832,13 +878,13 @@ function draw() {
     const duplicateGroup = duplicateGroups.get(String(land.cadName || '').trim()); const isDuplicate = Boolean(duplicateGroup); const isSelectedDuplicate = isDuplicate && String(land.cadName || '').trim() === state.duplicateView.selectedName;
     const measurement = Number(mapping?.measurement);
     const insideHistogramRange = !histogramFilterActive || (Number.isFinite(measurement) && measurement >= histogramFilterMin && measurement <= histogramFilterMax);
-    let landAlpha = histogramFilterActive ? (insideHistogramRange ? (mapping ? 0.96 : 0.28) : 0.07) : (mapping ? 0.9 : 0.48);
+    let landAlpha = histogramFilterActive ? (insideHistogramRange ? (mapping ? (isVerifiedMapping(mapping) ? 0.98 : 0.58) : 0.28) : 0.07) : (mapping ? (isVerifiedMapping(mapping) ? 0.96 : 0.55) : 0.42);
     if (duplicateEnabled && state.duplicateView.dimOthers && !isDuplicate) landAlpha *= 0.1;
     ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.fillStyle = measurementColor(mapping, minMeasurement, maxMeasurement); ctx.globalAlpha = landAlpha; ctx.fill(); ctx.globalAlpha = 1;
     if (histogramFilterActive && insideHistogramRange && mapping) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, radius + 1), 0, Math.PI * 2); ctx.strokeStyle = 'rgba(86,214,197,.72)'; ctx.lineWidth = 0.9; ctx.stroke(); }
     if (previewStatus) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2.5, radius + 1.5), 0, Math.PI * 2); ctx.strokeStyle = ['conflict', 'anchor-conflict', 'out-of-range'].includes(previewStatus) ? '#ff6b75' : '#2ba7ff'; ctx.globalAlpha = 0.72; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1; }
-    if (mapping?.anchorLocked) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(3.5, radius + 2.5), 0, Math.PI * 2); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.8; ctx.stroke(); }
-    else if (mapping?.manual) { ctx.strokeStyle = '#9d7cff'; ctx.lineWidth = 1.3; ctx.stroke(); }
+    if (isVerifiedMapping(mapping)) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(3.5, radius + 2.7), 0, Math.PI * 2); ctx.strokeStyle = mapping?.anchorLocked ? '#66e39f' : '#9ff2c0'; ctx.lineWidth = mapping?.anchorLocked ? 2 : 1.5; ctx.stroke(); }
+    else if (mapping) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2.8, radius + 1.6), 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255,189,91,.48)'; ctx.lineWidth = 0.9; ctx.stroke(); }
     if (duplicateEnabled && isDuplicate) {
       ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(4, radius + (isSelectedDuplicate ? 5 : 2.5)), 0, Math.PI * 2);
       ctx.strokeStyle = isSelectedDuplicate ? '#ffd166' : '#ff5bd3'; ctx.lineWidth = isSelectedDuplicate ? 2.4 : 1.35; ctx.stroke();
@@ -857,31 +903,70 @@ function showTooltip(event, land) {
   if (!land) { els.tooltip.classList.add('hidden'); return; }
   const mapping = mappingByGlobalId().get(Number(land.globalId)); const preview = state.preview?.lookup?.get(Number(land.globalId));
   const duplicateCount = duplicateGroupsForComponent().get(String(land.cadName || '').trim())?.length || 1;
-  els.tooltip.innerHTML = `<strong>${mapping?.alias || land.cadName}</strong><br>X-ray: ${mapping?.localIndex ?? '—'}<br>XML ID: ${land.globalId}<br>X: ${formatFloat.format(land.centerX)} · Y: ${formatFloat.format(land.centerY)}${mapping ? `<br>Measurement: ${mapping.measurement ?? '—'}` : ''}${duplicateCount > 1 ? `<br><b>ชื่อซ้ำ ${duplicateCount} ตำแหน่ง</b>` : ''}${preview ? `<br>Preview: X-ray ${preview.localIndex} · ${preview.status}` : ''}`;
+  els.tooltip.innerHTML = `<strong>${mapping?.alias || land.cadName}</strong><br>X-ray: ${mapping?.localIndex ?? '—'}<br>XML ID: ${land.globalId}<br>X: ${formatFloat.format(land.centerX)} · Y: ${formatFloat.format(land.centerY)}${mapping ? `<br>Measurement: ${mapping.measurement ?? '—'}<br>Status: ${isVerifiedMapping(mapping) ? 'Confirmed' : 'Unverified'}` : ''}${duplicateCount > 1 ? `<br><b>ชื่อซ้ำ ${duplicateCount} ตำแหน่ง</b>` : ''}${preview ? `<br>Preview: X-ray ${preview.localIndex} · ${preview.status}` : ''}`;
   const rect = els.canvas.getBoundingClientRect(); els.tooltip.style.left = `${Math.min(rect.width - 190, event.clientX - rect.left + 13)}px`; els.tooltip.style.top = `${Math.min(rect.height - 125, event.clientY - rect.top + 13)}px`; els.tooltip.classList.remove('hidden');
 }
-function directRemap(mapping, land, label = 'Manual remap') {
-  const component = currentComponent(); if (!component || !mapping || !land) return;
+function directRemap(mapping, land, label = 'Edit mapping') {
+  const component = currentComponent();
+  if (!component || !mapping || !land || mapping.sourceRow == null) return;
   const occupied = currentMappings().find((item) => item !== mapping && item.mapped && Number(item.globalId) === Number(land.globalId));
-  const oldLand = mapping.mapped ? component.lands.find((item) => Number(item.globalId) === Number(mapping.globalId)) : null; const changes = [];
+  const changes = [];
+
   if (occupied) {
-    const swapText = oldLand ? `สลับกับ X-ray Land ${occupied.localIndex}` : `Unmap X-ray Land ${occupied.localIndex}`;
-    if (!window.confirm(`ตำแหน่ง ${land.cadName} ถูกใช้โดย X-ray Land ${occupied.localIndex} อยู่แล้ว ระบบจะ${swapText} ต้องการดำเนินการต่อหรือไม่?`)) return;
-    changes.push({ mapping: occupied, before: snapshotMapping(occupied), after: oldLand ? stateForLand(occupied, oldLand, { manual: true, anchorLocked: false, confidence: 92, mappingMethod: 'manual-swap', duplicateCadNameCount: duplicateCountForLand(oldLand) }) : stateForUnmapped(occupied) });
+    if (isVerifiedMapping(occupied)) {
+      const proceed = window.confirm(`ตำแหน่ง ${land.cadName} ถูกยืนยันให้ X-ray ${occupied.localIndex} อยู่แล้ว หากใช้ตำแหน่งนี้ X-ray ${occupied.localIndex} จะถูก Unmap ต้องการดำเนินการต่อหรือไม่?`);
+      if (!proceed) return;
+    }
+    changes.push({
+      mapping: occupied,
+      before: snapshotMapping(occupied),
+      after: stateForUnmapped(occupied, { mappingMethod: isVerifiedMapping(occupied) ? 'displaced-confirmed' : 'displaced-auto-guess' }),
+    });
   }
-  changes.push({ mapping, before: snapshotMapping(mapping), after: stateForLand(mapping, land, { manual: true, anchorLocked: true, confidence: 100, mappingMethod: 'manual-anchor', duplicateCadNameCount: duplicateCountForLand(land) }) });
-  applyTransaction(label, changes); state.selected = mapping; state.manualMode = false; els.manualButton.textContent = 'เลือก CAD ใหม่'; els.manualBanner.classList.add('hidden'); toast(`ตั้ง Anchor: X-ray ${mapping.localIndex} → ${land.cadName}`);
+
+  const lockConfirmed = state.edit.enabled ? state.edit.lockConfirmed : true;
+  changes.push({
+    mapping,
+    before: snapshotMapping(mapping),
+    after: stateForLand(mapping, land, {
+      manual: true,
+      verified: true,
+      anchorLocked: lockConfirmed,
+      confidence: 100,
+      mappingMethod: 'manual-direct',
+      duplicateCadNameCount: duplicateCountForLand(land),
+    }),
+  });
+
+  if (!applyTransaction(label, changes)) {
+    if (!isVerifiedMapping(mapping)) {
+      const before = snapshotMapping(mapping);
+      const after = { ...before, manual: true, verified: true, anchorLocked: lockConfirmed, confidence: 100, mappingMethod: 'manual-direct' };
+      applyTransaction('Confirm current mapping', [{ mapping, before, after }]);
+    } else return;
+  }
+
+  state.selected = mapping;
+  toast(`ยืนยัน X-ray ${mapping.localIndex} → ${land.cadName}${occupied ? ` · Unmap X-ray ${occupied.localIndex}` : ''}`);
+  if (state.edit.enabled && state.edit.autoNext) advanceSelected(1);
+  else { updateDetails(); updateEditPanel(); renderTable(); draw(); }
 }
 function selectLand(land) {
-  if (!land) return; if (state.manualMode && state.selected) { directRemap(state.selected, land); return; }
+  if (!land) return;
+  if (state.edit.enabled && state.selected?.sourceRow != null) {
+    directRemap(state.selected, land);
+    return;
+  }
   const existing = mappingByGlobalId().get(Number(land.globalId));
   if (existing) selectMapping(existing, false);
-  else selectMapping({ sourceRow: null, componentName: currentComponent()?.name, packageName: currentComponent()?.packageName, localIndex: land.localIndex, componentId: land.componentId, globalId: land.globalId, cadName: land.cadName, left: land.left, top: land.top, centerX: land.centerX, centerY: land.centerY, width: land.width, length: land.length, measurement: null, confidence: 0, mapped: true, manual: false, anchorLocked: false, mappingMethod: 'xml-only', duplicateCadNameCount: duplicateCountForLand(land), raw: null }, false);
+  else if (state.edit.enabled) toast('ตำแหน่งนี้ยังไม่มี X-ray Land เลือกแถว X-ray จากตารางก่อน แล้วคลิกตำแหน่งนี้อีกครั้ง');
+  else selectMapping({ sourceRow: null, componentName: currentComponent()?.name, packageName: currentComponent()?.packageName, localIndex: land.localIndex, componentId: land.componentId, globalId: land.globalId, cadName: land.cadName, left: land.left, top: land.top, centerX: land.centerX, centerY: land.centerY, width: land.width, length: land.length, measurement: null, confidence: 0, mapped: true, manual: false, verified: false, anchorLocked: false, mappingMethod: 'xml-only', duplicateCadNameCount: duplicateCountForLand(land), raw: null }, false);
 }
 function toggleAnchor() {
   const mapping = state.selected; if (!mapping?.mapped) return; const before = snapshotMapping(mapping);
-  const after = { ...before, anchorLocked: !mapping.anchorLocked, manual: true, confidence: !mapping.anchorLocked ? 100 : mapping.confidence, mappingMethod: !mapping.anchorLocked ? 'manual-anchor' : 'manual' };
-  applyTransaction(after.anchorLocked ? 'Lock anchor' : 'Unlock anchor', [{ mapping, before, after }]); toast(after.anchorLocked ? `ล็อก X-ray ${mapping.localIndex} เป็น Anchor แล้ว` : `ปลด Anchor X-ray ${mapping.localIndex} แล้ว`);
+  const locking = !mapping.anchorLocked;
+  const after = { ...before, anchorLocked: locking, manual: true, verified: locking ? true : Boolean(mapping.verified), confidence: locking ? 100 : mapping.confidence, mappingMethod: locking ? 'manual-anchor' : (mapping.verified ? 'manual-direct' : 'manual-unverified') };
+  applyTransaction(locking ? 'Lock anchor' : 'Unlock anchor', [{ mapping, before, after }]); toast(locking ? `ล็อก X-ray ${mapping.localIndex} เป็น Anchor แล้ว` : `ปลด Anchor X-ray ${mapping.localIndex} แล้ว`);
 }
 function unmapSelected() {
   const mapping = state.selected; if (!mapping?.mapped) return; if (!window.confirm(`ยกเลิก Mapping ของ X-ray Land ${mapping.localIndex} ใช่หรือไม่?`)) return;
@@ -933,40 +1018,42 @@ function createPatternPreview(overrides = {}) {
   const preview = createSequencePreview(readPatternOptions(overrides)); if (!preview.ok) return toast(preview.error, 4200);
   preview.lookup = new Map(preview.proposals.filter((proposal) => proposal.land).map((proposal) => [Number(proposal.land.globalId), proposal])); state.preview = preview;
   if (overrides.direction) els.patternDirection.value = overrides.direction; if (overrides.startLocal != null) els.patternStart.value = overrides.startLocal; if (overrides.endLocal != null) els.patternEnd.value = overrides.endLocal;
-  renderPreviewSummary(); renderTable(); draw(); els.manualBanner.textContent = `Preview ${preview.direction}: ใช้ได้ ${formatInt.format(preview.counts.applicable)} · Conflict ${formatInt.format(preview.counts.conflicts + preview.counts.outOfRange)}`; els.manualBanner.classList.remove('hidden'); els.manualBanner.classList.add('preview-active');
+  renderPreviewSummary(); renderTable(); draw(); toast(`Safe Preview: ${formatInt.format(preview.counts.segments || 0)} ช่วง · ข้อเสนอ ${formatInt.format(preview.counts.highConfidence)}`);
 }
 function previewBetweenAnchors() { const range = getAnchorRange(currentMappings()); if (!range) return toast('ต้องมี Anchor อย่างน้อย 2 จุด'); createPatternPreview({ startLocal: range.start, endLocal: range.end }); }
-function clearPreview() { state.preview = null; els.manualBanner.classList.add('hidden'); els.manualBanner.classList.remove('preview-active'); renderPreviewSummary(); renderTable(); draw(); }
+function clearPreview() { state.preview = null; if (!state.edit.enabled) els.manualBanner.classList.add('hidden'); els.manualBanner.classList.remove('preview-active'); renderPreviewSummary(); renderTable(); draw(); }
 function renderPreviewSummary() {
   const preview = state.preview;
   if (!preview) {
     els.previewTitle.textContent = 'ยังไม่มี Preview'; els.previewDirectionBadge.textContent = '—'; els.previewDirectionBadge.className = 'status-pill muted'; els.previewApplicable.textContent = '0'; els.previewHigh.textContent = '0'; els.previewReview.textContent = '0'; els.previewConflict.textContent = '0'; els.previewFormula.textContent = 'วาง Anchor แล้วกดสร้าง Preview'; els.previewWarning.classList.add('hidden'); els.applyPatternButton.disabled = true; els.applyHighButton.disabled = true; els.clearPreviewButton.disabled = true; return;
   }
-  const counts = preview.counts; els.previewTitle.textContent = `${formatInt.format(counts.total)} จุดในช่วง ${preview.range.start}–${preview.range.end}`; els.previewDirectionBadge.textContent = preview.direction === 'reverse' ? 'Reverse' : 'Forward'; els.previewDirectionBadge.className = 'status-pill ready';
-  els.previewApplicable.textContent = formatInt.format(counts.applicable); els.previewHigh.textContent = formatInt.format(counts.highConfidence); els.previewReview.textContent = formatInt.format(counts.review); els.previewConflict.textContent = formatInt.format(counts.conflicts + counts.outOfRange); els.previewFormula.innerHTML = `${preview.formula}<br>Anchor ${counts.anchors} จุด · residual สูงสุด ${preview.fit.maxResidual}`;
-  const warnings = []; if (!counts.anchors) warnings.push('Preview นี้ไม่มี Anchor ยืนยัน จึงเป็นเพียงสมมติฐานและ Confidence ต่ำ'); if (preview.fit.maxResidual > 0) warnings.push('Anchor บางจุดไม่อยู่ในแพตเทิร์น +1/−1 เดียวกัน ควรตรวจจุดอ้างอิง'); if (counts.conflicts || counts.outOfRange) warnings.push(`มี Conflict/Out of range ${counts.conflicts + counts.outOfRange} จุด ระบบจะไม่ Apply จุดเหล่านี้`);
+  const counts = preview.counts; els.previewTitle.textContent = `${formatInt.format(counts.total)} จุดในช่วง ${preview.range.start}–${preview.range.end}`; els.previewDirectionBadge.textContent = preview.direction === 'mixed' ? 'Mixed' : (preview.direction === 'reverse' ? 'Reverse' : 'Forward'); els.previewDirectionBadge.className = 'status-pill ready';
+  els.previewApplicable.textContent = formatInt.format(counts.applicable); els.previewHigh.textContent = formatInt.format(counts.highConfidence); els.previewReview.textContent = formatInt.format(counts.rejectedSegments || 0); els.previewConflict.textContent = formatInt.format(counts.conflicts + counts.outOfRange); els.previewFormula.innerHTML = `${preview.formula}<br>Anchor ${counts.anchors} จุด · ช่วงที่ผ่าน ${counts.segments || 0} · ช่วงที่ไม่ผ่าน ${counts.rejectedSegments || 0}`;
+  const warnings = []; if (counts.rejectedSegments) warnings.push(`ข้าม ${counts.rejectedSegments} ช่วง เพราะ Anchor ไม่พิสูจน์ลำดับต่อเนื่อง`); if (counts.conflicts || counts.outOfRange) warnings.push(`มี Conflict/Out of range ${counts.conflicts + counts.outOfRange} จุด ระบบจะไม่ Apply จุดเหล่านี้`); warnings.push('ผล Pattern เป็นเพียงข้อเสนอ ยังไม่ถือว่า Confirmed');
   if (warnings.length) { els.previewWarning.textContent = warnings.join(' · '); els.previewWarning.classList.remove('hidden'); } else els.previewWarning.classList.add('hidden');
   els.applyPatternButton.disabled = counts.applicable === 0; els.applyHighButton.disabled = counts.highConfidence === 0; els.clearPreviewButton.disabled = false;
 }
 function applyPattern(highOnly = false) {
   const preview = state.preview; if (!preview) return; const changes = [];
   for (const proposal of preview.proposals) {
-    if (!proposal.land || ['conflict', 'anchor-conflict', 'out-of-range'].includes(proposal.status) || (highOnly && proposal.confidence < 95) || proposal.mapping.anchorLocked) continue;
-    changes.push({ mapping: proposal.mapping, before: snapshotMapping(proposal.mapping), after: stateForLand(proposal.mapping, proposal.land, { manual: true, anchorLocked: false, confidence: proposal.confidence, mappingMethod: `taught-${preview.direction}`, duplicateCadNameCount: duplicateCountForLand(proposal.land) }) });
+    if (!proposal.land || proposal.status !== 'suggested' || (highOnly && proposal.confidence < 95) || proposal.mapping.anchorLocked || isVerifiedMapping(proposal.mapping)) continue;
+    changes.push({ mapping: proposal.mapping, before: snapshotMapping(proposal.mapping), after: stateForLand(proposal.mapping, proposal.land, { manual: false, verified: false, anchorLocked: false, confidence: 60, mappingMethod: 'pattern-suggestion', duplicateCadNameCount: duplicateCountForLand(proposal.land) }) });
   }
-  if (!changes.length) return toast('ไม่มีรายการที่สามารถ Apply ได้'); applyTransaction(highOnly ? 'Apply high-confidence pattern' : 'Apply manual taught pattern', changes); toast(`Apply Pattern แล้ว ${formatInt.format(changes.length)} จุด`);
+  if (!changes.length) return toast('ไม่มีข้อเสนอที่สามารถ Apply ได้');
+  applyTransaction('Apply safe pattern suggestions', changes);
+  toast(`ใช้เป็นข้อเสนอแล้ว ${formatInt.format(changes.length)} จุด · ยังไม่ Confirmed`);
 }
 function clearAllAnchors() {
   const anchors = currentMappings().filter((mapping) => mapping.anchorLocked); if (!anchors.length) return; if (!window.confirm(`ปลด Anchor ทั้งหมด ${anchors.length} จุดใช่หรือไม่?`)) return;
-  const changes = anchors.map((mapping) => ({ mapping, before: snapshotMapping(mapping), after: { ...snapshotMapping(mapping), anchorLocked: false, mappingMethod: mapping.manual ? 'manual' : 'auto-sequence' } })); applyTransaction('Clear all anchors', changes); toast('ปลด Anchor ทั้งหมดแล้ว');
+  const changes = anchors.map((mapping) => ({ mapping, before: snapshotMapping(mapping), after: { ...snapshotMapping(mapping), anchorLocked: false, verified: Boolean(mapping.verified), mappingMethod: mapping.verified ? 'manual-direct' : 'auto-order-guess' } })); applyTransaction('Clear all anchors', changes); toast('ปลด Anchor ทั้งหมดแล้ว');
 }
 function shiftCurrentMappings(delta) {
   const component = currentComponent(); if (!component) return; const start = els.patternStart.value === '' ? -Infinity : Number(els.patternStart.value); const end = els.patternEnd.value === '' ? Infinity : Number(els.patternEnd.value);
   const moving = currentMappings().filter((m) => Number(m.localIndex) >= Math.min(start, end) && Number(m.localIndex) <= Math.max(start, end)); const movingSet = new Set(moving);
   const occupiedOutside = new Set(currentMappings().filter((m) => (!movingSet.has(m) || m.anchorLocked) && m.mapped).map((m) => Number(m.globalId))); const changes = [];
   for (const mapping of moving) {
-    if (!mapping.mapped || mapping.anchorLocked) continue; const index = findLandIndex(component, mapping.globalId); const land = component.lands[index + delta]; if (!land || occupiedOutside.has(Number(land.globalId))) continue;
-    changes.push({ mapping, before: snapshotMapping(mapping), after: stateForLand(mapping, land, { manual: true, anchorLocked: false, confidence: Math.min(mapping.confidence || 85, 90), mappingMethod: `manual-shift-${delta > 0 ? 'plus' : 'minus'}1`, duplicateCadNameCount: duplicateCountForLand(land) }) });
+    if (!mapping.mapped || mapping.anchorLocked || isVerifiedMapping(mapping)) continue; const index = findLandIndex(component, mapping.globalId); const land = component.lands[index + delta]; if (!land || occupiedOutside.has(Number(land.globalId))) continue;
+    changes.push({ mapping, before: snapshotMapping(mapping), after: stateForLand(mapping, land, { manual: false, verified: false, anchorLocked: false, confidence: 30, mappingMethod: `shift-suggestion-${delta > 0 ? 'plus' : 'minus'}1`, duplicateCadNameCount: duplicateCountForLand(land) }) });
   }
   if (!changes.length) return toast('ไม่มีรายการที่เลื่อนได้ หรือชนกับ Anchor/ขอบเขต'); if (!window.confirm(`Shift Mapping ${delta > 0 ? '+1' : '-1'} จำนวน ${changes.length} จุดใช่หรือไม่?`)) return; applyTransaction(`Shift mappings ${delta > 0 ? '+1' : '-1'}`, changes); toast(`Shift แล้ว ${formatInt.format(changes.length)} จุด`);
 }
@@ -976,31 +1063,68 @@ function unmapRange() {
   if (!targets.length) return toast('ไม่มีรายการในช่วงที่สามารถ Unmap ได้'); if (!window.confirm(`Unmap ${targets.length} จุดในช่วงนี้ โดยรักษา Anchor ไว้ใช่หรือไม่?`)) return; applyTransaction('Unmap range', targets.map((mapping) => ({ mapping, before: snapshotMapping(mapping), after: stateForUnmapped(mapping) }))); toast(`Unmap แล้ว ${formatInt.format(targets.length)} จุด`);
 }
 function exportCsv() {
-  const mappings = state.mappingData?.mappings || []; const headers = ['xray_local_land','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row']; const lines = [headers.join(',')];
-  for (const m of mappings) lines.push([m.localIndex, m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.confidence, m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
-  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.5.0.csv`);
+  const mappings = state.mappingData?.mappings || [];
+  const headers = ['xray_local_land','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','verified','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row'];
+  const lines = [headers.join(',')];
+  for (const m of mappings) lines.push([m.localIndex, m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.confidence, isVerifiedMapping(m), m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
+  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.6.0.csv`);
 }
 function exportJson() {
-  const payload = { app: 'BGA Land Mapper', version: '0.5.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries,
-    overrides: (state.mappingData?.mappings || []).filter((m) => m.manual || m.alias || m.anchorLocked || !m.mapped).map((m) => ({ sourceRow: m.sourceRow, localIndex: m.localIndex, componentName: m.componentName, componentId: m.componentId, globalId: m.globalId, cadName: m.cadName, alias: m.alias || '', manual: Boolean(m.manual), mapped: Boolean(m.mapped), anchorLocked: Boolean(m.anchorLocked), confidence: m.confidence, mappingMethod: m.mappingMethod })) };
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.5.0.json');
+  const overrides = (state.mappingData?.mappings || [])
+    .filter((m) => isVerifiedMapping(m) || m.alias || m.mappingMethod === 'manual-unmapped')
+    .map((m) => ({ sourceRow: m.sourceRow, localIndex: m.localIndex, componentName: m.componentName, componentId: m.componentId, globalId: m.globalId, cadName: m.cadName, alias: m.alias || '', manual: Boolean(m.manual), verified: isVerifiedMapping(m), mapped: Boolean(m.mapped), anchorLocked: Boolean(m.anchorLocked), confidence: m.confidence, mappingMethod: m.mappingMethod }));
+  const payload = { app: 'BGA Land Mapper', version: '0.6.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries, safeMapping: true, overrides };
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.6.0.json');
+}
+function trustedBackupItem(item) {
+  const method = String(item?.mappingMethod || '');
+  if (item?.verified === true) return true;
+  if (method === 'manual-direct' || method === 'restored-confirmed') return true;
+  return Boolean(item?.anchorLocked && method === 'manual-anchor');
 }
 async function restoreBackup(file) {
   if (!file || !state.mappingData || !state.xmlData) return;
   try {
-    const payload = JSON.parse(await file.text()); if (!Array.isArray(payload.overrides)) throw new Error('ไฟล์ Backup ไม่มี overrides');
-    const bySourceRow = new Map(state.mappingData.mappings.map((m) => [Number(m.sourceRow), m])); const byKey = new Map(state.mappingData.mappings.map((m) => [`${m.componentName}\u0000${m.localIndex}`, m])); const changes = []; let skipped = 0;
+    const payload = JSON.parse(await file.text());
+    if (!Array.isArray(payload.overrides)) throw new Error('ไฟล์ Backup ไม่มี overrides');
+    const bySourceRow = new Map(state.mappingData.mappings.map((m) => [Number(m.sourceRow), m]));
+    const byKey = new Map(state.mappingData.mappings.map((m) => [`${m.componentName}\u0000${m.localIndex}`, m]));
+    const changes = [];
+    let skipped = 0;
+    let ignoredGenerated = 0;
+    let restoredConfirmed = 0;
+    let restoredNotes = 0;
+
     for (const item of payload.overrides) {
-      const mapping = bySourceRow.get(Number(item.sourceRow)) || byKey.get(`${item.componentName}\u0000${item.localIndex}`); if (!mapping) { skipped += 1; continue; }
-      let after;
-      if (item.mapped === false || item.globalId == null) after = stateForUnmapped(mapping);
-      else {
-        const component = state.xmlData.componentById.get(String(item.componentId || mapping.componentId)); const land = component?.lands.find((candidate) => Number(candidate.globalId) === Number(item.globalId)); if (!land) { skipped += 1; continue; }
-        after = stateForLand(mapping, land, { manual: item.manual ?? true, anchorLocked: Boolean(item.anchorLocked), confidence: Number(item.confidence ?? 100), mappingMethod: item.mappingMethod || 'restored-backup', duplicateCadNameCount: duplicateCountForLand(land) });
+      const mapping = bySourceRow.get(Number(item.sourceRow)) || byKey.get(`${item.componentName}\u0000${item.localIndex}`);
+      if (!mapping) { skipped += 1; continue; }
+      const method = String(item.mappingMethod || '');
+      let after = snapshotMapping(mapping);
+      let changed = false;
+
+      if (item.alias) { after.alias = String(item.alias); restoredNotes += 1; changed = true; }
+
+      if (item.mapped === false && method === 'manual-unmapped') {
+        after = { ...stateForUnmapped(mapping), alias: item.alias || '' };
+        changed = true;
+      } else if (trustedBackupItem(item) && item.mapped !== false && item.globalId != null) {
+        const component = state.xmlData.componentById.get(String(item.componentId || mapping.componentId));
+        const land = component?.lands.find((candidate) => Number(candidate.globalId) === Number(item.globalId));
+        if (!land) { skipped += 1; continue; }
+        after = stateForLand(mapping, land, { manual: true, verified: true, anchorLocked: Boolean(item.anchorLocked), confidence: 100, mappingMethod: item.anchorLocked ? 'manual-anchor' : 'manual-direct', duplicateCadNameCount: duplicateCountForLand(land) });
+        after.alias = item.alias || '';
+        restoredConfirmed += 1;
+        changed = true;
+      } else if (isUnsafeGeneratedMapping(item) || item.manual) {
+        ignoredGenerated += 1;
       }
-      after.alias = item.alias || ''; changes.push({ mapping, before: snapshotMapping(mapping), after });
+
+      if (changed) changes.push({ mapping, before: snapshotMapping(mapping), after });
     }
-    if (!changes.length) throw new Error('ไม่พบรายการใน Backup ที่ตรงกับโปรเจกต์นี้'); applyTransaction('Restore backup JSON', changes); toast(`นำเข้า Backup แล้ว ${formatInt.format(changes.length)} รายการ${skipped ? ` · ข้าม ${skipped}` : ''}`, 4500);
+
+    if (!changes.length) throw new Error('ไม่พบจุดที่ผู้ใช้ยืนยันจริงใน Backup นี้');
+    applyTransaction('Restore safe backup JSON', changes);
+    toast(`กู้คืน Confirmed ${formatInt.format(restoredConfirmed)} จุด${restoredNotes ? ` · หมายเหตุ ${formatInt.format(restoredNotes)}` : ''} · ตัด Mapping ที่ระบบกระจาย ${formatInt.format(ignoredGenerated)} จุด${skipped ? ` · ข้าม ${formatInt.format(skipped)}` : ''}`, 6500);
   } catch (error) { console.error(error); toast(`นำเข้า Backup ไม่สำเร็จ: ${error.message}`, 5200); }
   finally { els.restoreFile.value = ''; }
 }
@@ -1069,7 +1193,12 @@ els.fitButton.addEventListener('click', fitView); els.zoomInButton.addEventListe
 els.searchButton.addEventListener('click', search); els.searchInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') search(); });
 els.tableFilter.addEventListener('change', () => { state.filter = els.tableFilter.value; state.page = 1; renderTable(); }); els.prevPage.addEventListener('click', () => { state.page -= 1; renderTable(); }); els.nextPage.addEventListener('click', () => { state.page += 1; renderTable(); });
 els.exportCsvButton.addEventListener('click', exportCsv); els.exportJsonButton.addEventListener('click', exportJson);
-els.manualButton.addEventListener('click', () => { if (!state.selected) return; state.manualMode = !state.manualMode; els.manualButton.textContent = state.manualMode ? 'ยกเลิกเลือก CAD' : 'เลือก CAD ใหม่'; els.manualBanner.textContent = `เลือกตำแหน่ง CAD ใหม่ให้ X-ray Land ${state.selected.localIndex} — จุดที่เลือกจะถูกล็อกเป็น Anchor`; els.manualBanner.classList.toggle('hidden', !state.manualMode); els.manualBanner.classList.remove('preview-active'); });
+els.manualButton.addEventListener('click', () => setEditMode(!state.edit.enabled));
+els.exitEditButton.addEventListener('click', () => setEditMode(false));
+els.editPrevButton.addEventListener('click', () => advanceSelected(-1));
+els.editNextButton.addEventListener('click', () => advanceSelected(1));
+els.editAutoNext.addEventListener('change', () => { state.edit.autoNext = els.editAutoNext.checked; updateEditPanel(); });
+els.editLockConfirmed.addEventListener('change', () => { state.edit.lockConfirmed = els.editLockConfirmed.checked; updateEditPanel(); });
 els.teachButton.addEventListener('click', openTeachPanel); els.undoButton.addEventListener('click', undo); els.redoButton.addEventListener('click', redo); els.anchorButton.addEventListener('click', toggleAnchor); els.unmapButton.addEventListener('click', unmapSelected); els.nudgePrevButton.addEventListener('click', () => nudgeSelected(-1)); els.nudgeNextButton.addEventListener('click', () => nudgeSelected(1));
 els.saveAliasButton.addEventListener('click', () => { if (!state.selected) return; const before = snapshotMapping(state.selected); const after = { ...before, alias: els.aliasInput.value.trim() }; applyTransaction('Edit note', [{ mapping: state.selected, before, after }]); toast('บันทึกหมายเหตุแล้ว'); });
 els.copyRawButton.addEventListener('click', async () => { await navigator.clipboard.writeText(els.rawData.textContent); toast('คัดลอกข้อมูลต้นทางแล้ว'); });
@@ -1082,7 +1211,7 @@ els.canvas.addEventListener('pointerdown', (event) => { els.canvas.setPointerCap
 els.canvas.addEventListener('pointermove', (event) => { const point = getCanvasPoint(event); if (state.dragging && state.lastPointer) { state.view.offsetX += point.x - state.lastPointer.x; state.view.offsetY += point.y - state.lastPointer.y; state.lastPointer = point; draw(); els.tooltip.classList.add('hidden'); return; } state.hoveredLand = findNearestLand(point.x, point.y); showTooltip(event, state.hoveredLand); });
 els.canvas.addEventListener('pointerup', (event) => { const point = getCanvasPoint(event); const moved = state.dragStart ? Math.hypot(point.x - state.dragStart.x, point.y - state.dragStart.y) : 0; state.dragging = false; state.lastPointer = null; state.dragStart = null; if (moved < 4) selectLand(findNearestLand(point.x, point.y)); });
 els.canvas.addEventListener('pointercancel', () => { state.dragging = false; state.lastPointer = null; state.dragStart = null; }); els.canvas.addEventListener('pointerleave', () => els.tooltip.classList.add('hidden'));
-window.addEventListener('keydown', (event) => { const tag = document.activeElement?.tagName; if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) return; if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); } if (event.key === 'Escape') { state.manualMode = false; els.manualButton.textContent = 'เลือก CAD ใหม่'; els.manualBanner.classList.add('hidden'); closeTeachPanel(); closeDetailedHistogram(); } });
+window.addEventListener('keydown', (event) => { const tag = document.activeElement?.tagName; if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) return; if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); } if (state.edit.enabled && event.key === 'ArrowLeft') { event.preventDefault(); advanceSelected(-1); } if (state.edit.enabled && event.key === 'ArrowRight') { event.preventDefault(); advanceSelected(1); } if (event.key === 'Escape') { setEditMode(false); closeTeachPanel(); closeDetailedHistogram(); } });
 window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); state.installPrompt = event; els.installButton.classList.remove('hidden'); });
 els.installButton.addEventListener('click', async () => { if (!state.installPrompt) return; state.installPrompt.prompt(); await state.installPrompt.userChoice; state.installPrompt = null; els.installButton.classList.add('hidden'); });
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.warn));

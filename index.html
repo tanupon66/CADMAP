@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
-  <title>BGA Land Mapper v0.5.0</title>
+  <title>BGA Land Mapper v0.6.0</title>
 </head>
 <body>
   <header class="topbar">
@@ -66,7 +66,8 @@
       <section class="panel-section stats-section">
         <span class="eyebrow">3. SUMMARY</span>
         <div class="stat-grid">
-          <div class="stat"><span>Mapped</span><strong id="mappedStat">0</strong></div>
+          <div class="stat"><span>CAD suggestions</span><strong id="mappedStat">0</strong></div>
+          <div class="stat"><span>Confirmed</span><strong id="verifiedStat">0</strong></div>
           <div class="stat"><span>Unmapped</span><strong id="unmappedStat">0</strong></div>
           <div class="stat"><span>CAD lands shown</span><strong id="xmlLandStat">0</strong></div>
           <div class="stat"><span>Raw-data parts</span><strong id="componentStat">0</strong></div>
@@ -103,7 +104,7 @@
           <button id="searchButton" type="button">ค้นหา</button>
         </div>
         <div class="toolbar-actions">
-          <button id="manualButton" type="button" disabled>เลือก CAD ใหม่</button>
+          <button id="manualButton" type="button" disabled>โหมด Edit</button>
           <button id="teachButton" type="button" disabled>Manual Teach</button>
           <button id="undoButton" type="button" disabled>Undo</button>
           <button id="redoButton" type="button" disabled>Redo</button>
@@ -122,9 +123,20 @@
           <span class="measurement-gradient"></span>
           <span>Measurement ต่ำ → สูง</span>
           <span><i class="dot selected"></i> จุดที่เลือก</span>
+          <span><i class="dot confirmed"></i> ยืนยันด้วยตนเอง</span>
           <span><i class="dot duplicate"></i> ชื่อ CAD ซ้ำ</span>
         </div>
-        <div id="manualBanner" class="manual-banner hidden">โหมดแก้ Mapping: คลิก Land ที่ต้องการนำมาจับคู่กับรายการที่เลือก</div>
+        <div id="manualBanner" class="manual-banner edit-panel hidden">
+          <div class="edit-panel-heading"><strong>EDIT MODE</strong><button id="exitEditButton" class="edit-close" type="button" aria-label="ออกจากโหมด Edit">✕</button></div>
+          <span id="editCurrentLabel">เลือก X-ray Land จากตารางหรือค้นหา</span>
+          <small>จากนั้นคลิกตำแหน่ง CAD บนกราฟิกเพื่อยืนยันจุดนั้นทันที</small>
+          <div class="edit-panel-actions">
+            <button id="editPrevButton" type="button">← ก่อนหน้า</button>
+            <button id="editNextButton" type="button">ถัดไป →</button>
+          </div>
+          <label class="edit-toggle"><input id="editAutoNext" type="checkbox" checked /> เลื่อนไป X-ray ถัดไปอัตโนมัติ</label>
+          <label class="edit-toggle"><input id="editLockConfirmed" type="checkbox" checked /> ล็อกจุดที่คลิกเป็น Confirmed</label>
+        </div>
         <div id="tooltip" class="tooltip hidden"></div>
       </div>
 
@@ -138,7 +150,8 @@
             <select id="tableFilter">
               <option value="all">ทั้งหมด</option>
               <option value="duplicate">ชื่อ CAD ซ้ำ</option>
-              <option value="manual">แก้ด้วยตนเอง</option>
+              <option value="verified">Confirmed</option>
+              <option value="unverified">ยังไม่ยืนยัน</option>
               <option value="unmapped">Unmapped</option>
             </select>
             <button id="prevPage" type="button">‹</button>
@@ -172,6 +185,7 @@
         <div><span>Confidence</span><strong id="dConfidence">—</strong></div>
         <div><span>Source row</span><strong id="dRow">—</strong></div>
         <div><span>Mapping method</span><strong id="dMethod">—</strong></div>
+        <div><span>Confirmed</span><strong id="dVerified">—</strong></div>
         <div><span>Anchor</span><strong id="dAnchor">—</strong></div>
       </section>
       <section id="duplicatePanel" class="panel-section duplicate-panel">
@@ -226,7 +240,7 @@
           <button id="nudgePrevButton" type="button" disabled>เลื่อน CAD −1</button>
           <button id="nudgeNextButton" type="button" disabled>เลื่อน CAD +1</button>
         </div>
-        <p class="helper-text">Anchor คือจุดที่ยืนยันว่าถูกต้อง โปรแกรมจะใช้จุดเหล่านี้เรียนรู้ทิศทางและ Offset ของ Land ที่เหลือ</p>
+        <p class="helper-text">จุดที่คลิกใน Edit Mode เท่านั้นจะเป็น Confirmed ส่วน Auto order และ Pattern เป็นเพียงข้อเสนอจนกว่าจะยืนยันด้วยตนเอง</p>
       </section>
       <section class="panel-section">
         <label>ชื่อแสดงผล / หมายเหตุ
@@ -241,7 +255,7 @@
       </section>
       <section class="panel-section about-section">
         <strong>วิธี Mapping ของโปรเจกต์นี้</strong>
-        <p>จับคู่ Component และ Package ก่อน จากนั้นใช้ลำดับ Land ภายใน Component ไปยัง Land ที่เรียงตาม XML global ID จึงไม่ควรเทียบหมายเลขเครื่องกับ XML ID โดยตรง</p>
+        <p>โปรแกรมใช้ Component และ Package เพื่อเปิด CAD ที่เกี่ยวข้อง แต่ลำดับ XML เป็นเพียง Auto guess ไม่ถือว่าถูกต้อง จุดที่เป็น Confirmed ต้องมาจาก Edit Mode หรือ Anchor ที่ผู้ใช้ยืนยัน</p>
       </section>
     </aside>
   </main>
@@ -250,9 +264,9 @@
     <div class="teach-dialog panel">
       <div class="teach-header">
         <div>
-          <span class="eyebrow">MANUAL TEACH → PATTERN PREVIEW</span>
-          <h2 id="teachTitle">สอนแพตเทิร์น Mapping</h2>
-          <p id="teachComponentLabel">เลือก Anchor อย่างน้อย 1 จุด แล้วให้โปรแกรมคำนวณต่อ</p>
+          <span class="eyebrow">SAFE PATTERN PREVIEW</span>
+          <h2 id="teachTitle">ตรวจ Pattern เฉพาะช่วงที่ปลอดภัย</h2>
+          <p id="teachComponentLabel">ต้องมี Anchor อย่างน้อย 2 จุด และจะเติมเฉพาะช่วงระหว่าง Anchor ที่ลำดับตรงกันพอดี</p>
         </div>
         <button id="closeTeachButton" class="icon-button" type="button" aria-label="ปิด">✕</button>
       </div>
@@ -275,7 +289,7 @@
                 <option value="reverse">Reverse: เลขเพิ่มสวน CAD</option>
               </select>
             </label>
-            <label>Shift เพิ่มเติม<input id="patternShift" type="number" step="1" value="0" /></label>
+            <label>Shift เพิ่มเติม<input id="patternShift" type="number" step="1" value="0" disabled title="Safe mode ไม่อนุญาต Shift" /></label>
             <label>เริ่ม X-ray Land<input id="patternStart" type="number" step="1" placeholder="อัตโนมัติ" /></label>
             <label>สิ้นสุด X-ray Land<input id="patternEnd" type="number" step="1" placeholder="อัตโนมัติ" /></label>
           </div>
@@ -300,20 +314,20 @@
           <div id="previewFormula" class="formula-card">วาง Anchor แล้วกดสร้าง Preview</div>
           <p id="previewWarning" class="warning hidden"></p>
           <div class="teach-button-row apply-row">
-            <button id="applyPatternButton" class="primary" type="button" disabled>ยืนยันและใช้ Pattern</button>
-            <button id="applyHighButton" type="button" disabled>ใช้เฉพาะ Confidence สูง</button>
+            <button id="applyPatternButton" class="primary" type="button" disabled>ใช้เป็นข้อเสนอ (ยังไม่ยืนยัน)</button>
+            <button id="applyHighButton" type="button" disabled>ใช้ข้อเสนอที่ปลอดภัย</button>
           </div>
         </section>
         <section class="teach-card">
           <span class="eyebrow">QUICK OPERATIONS</span>
           <div class="quick-grid">
-            <button id="previewForwardButton" type="button">Preview Forward ทั้งชุด</button>
-            <button id="previewReverseButton" type="button">Preview Reverse ทั้งชุด</button>
+            <button id="previewForwardButton" type="button">ตรวจ Forward ระหว่าง Anchor</button>
+            <button id="previewReverseButton" type="button">ตรวจ Reverse ระหว่าง Anchor</button>
             <button id="shiftAllPrevButton" type="button">Shift ผลปัจจุบัน −1</button>
             <button id="shiftAllNextButton" type="button">Shift ผลปัจจุบัน +1</button>
             <button id="unmapRangeButton" class="danger-button" type="button">Unmap ช่วงที่กำหนด</button>
           </div>
-          <p class="helper-text">ทุกคำสั่งบันทึกใน History และย้อนกลับด้วย Undo/Redo ได้</p>
+          <p class="helper-text">Safe Pattern ไม่ขยายออกนอก Anchor และผลที่ Apply ยังไม่ถือว่า Confirmed จนกว่าจะคลิกยืนยันใน Edit Mode</p>
         </section>
       </div>
     </div>

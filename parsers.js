@@ -423,9 +423,12 @@ export function buildMappings(xmlData, xlsxData, schema) {
       width: land?.width ?? null,
       length: land?.length ?? null,
       measurement: schema.measurementCol == null ? null : row[schema.measurementCol],
-      confidence,
+      confidence: land ? Math.min(40, confidence) : 0,
       mapped: Boolean(land),
       manual: false,
+      verified: false,
+      anchorLocked: false,
+      mappingMethod: land ? 'auto-order-guess' : 'unmapped',
       duplicateCadNameCount: land ? (cadNameCounts.get(`${component.id}\u0000${land.cadName}`) || 1) : 0,
       raw: row,
     });

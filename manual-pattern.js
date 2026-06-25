@@ -1,6 +1,6 @@
 const EDITABLE_FIELDS = [
   'componentId', 'globalId', 'cadName', 'left', 'top', 'centerX', 'centerY',
-  'width', 'length', 'mapped', 'manual', 'confidence', 'anchorLocked',
+  'width', 'length', 'mapped', 'manual', 'verified', 'confidence', 'anchorLocked',
   'mappingMethod', 'duplicateCadNameCount', 'alias',
 ];
 
@@ -16,6 +16,7 @@ export function restoreMapping(mapping, snapshot) {
 }
 
 export function stateForLand(mapping, land, options = {}) {
+  const anchorLocked = options.anchorLocked ?? Boolean(mapping.anchorLocked);
   return {
     ...snapshotMapping(mapping),
     componentId: land.componentId,
@@ -29,14 +30,15 @@ export function stateForLand(mapping, land, options = {}) {
     length: land.length,
     mapped: true,
     manual: options.manual ?? true,
-    confidence: options.confidence ?? 100,
-    anchorLocked: options.anchorLocked ?? Boolean(mapping.anchorLocked),
-    mappingMethod: options.mappingMethod || 'manual',
+    verified: options.verified ?? Boolean(anchorLocked),
+    confidence: options.confidence ?? (anchorLocked ? 100 : 0),
+    anchorLocked,
+    mappingMethod: options.mappingMethod || (anchorLocked ? 'manual-direct' : 'manual-unverified'),
     duplicateCadNameCount: options.duplicateCadNameCount ?? mapping.duplicateCadNameCount ?? 1,
   };
 }
 
-export function stateForUnmapped(mapping) {
+export function stateForUnmapped(mapping, options = {}) {
   return {
     ...snapshotMapping(mapping),
     globalId: null,
@@ -48,19 +50,13 @@ export function stateForUnmapped(mapping) {
     width: null,
     length: null,
     mapped: false,
-    manual: true,
+    manual: options.manual ?? true,
+    verified: false,
     confidence: 0,
     anchorLocked: false,
-    mappingMethod: 'manual-unmapped',
+    mappingMethod: options.mappingMethod || 'manual-unmapped',
     duplicateCadNameCount: 0,
   };
-}
-
-function median(values) {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function landIndexByGlobalId(component) {
@@ -81,132 +77,129 @@ function normalizeRange(mappings, startLocal, endLocal) {
   return { start: Math.max(minimum, start), end: Math.min(maximum, end), minimum, maximum };
 }
 
-function fitDirection(anchors, direction, componentSize) {
-  if (!anchors.length) {
-    return direction === 'reverse'
-      ? { direction, constant: componentSize - 1, residuals: [], maxResidual: 0, totalResidual: 0, inferredWithoutAnchor: true }
-      : { direction: 'forward', constant: 0, residuals: [], maxResidual: 0, totalResidual: 0, inferredWithoutAnchor: true };
-  }
-  const constants = anchors.map(({ localIndex, cadIndex }) => direction === 'reverse'
-    ? cadIndex + (localIndex - 1)
-    : cadIndex - (localIndex - 1));
-  const constant = Math.round(median(constants));
-  const residuals = anchors.map(({ localIndex, cadIndex }) => {
-    const expected = direction === 'reverse' ? constant - (localIndex - 1) : (localIndex - 1) + constant;
-    return Math.abs(cadIndex - expected);
-  });
-  return {
-    direction,
-    constant,
-    residuals,
-    maxResidual: residuals.length ? Math.max(...residuals) : 0,
-    totalResidual: residuals.reduce((sum, value) => sum + value, 0),
-    inferredWithoutAnchor: false,
-  };
-}
+function directionName(step) { return step > 0 ? 'forward' : 'reverse'; }
 
+/**
+ * Safe pattern preview.
+ *
+ * It never extrapolates before the first anchor or after the last anchor. A segment
+ * is valid only when two adjacent anchors prove an exact +1 or -1 CAD sequence:
+ * abs(CAD index difference) === X-ray local-index difference.
+ */
 export function createSequencePreview({ mappings, component, direction = 'auto', userShift = 0, startLocal = null, endLocal = null, preserveAnchors = true }) {
   if (!component || !Array.isArray(component.lands) || !component.lands.length) return { ok: false, error: 'Component นี้ไม่มีข้อมูล Land' };
-  const componentMappings = mappings.filter((m) => Number.isFinite(Number(m.localIndex))).sort((a, b) => Number(a.localIndex) - Number(b.localIndex));
+  if (Number(userShift || 0) !== 0) return { ok: false, error: 'Safe Pattern ไม่อนุญาต Shift เพราะจะทำให้ Anchor ไม่ตรง กรุณาแก้ด้วย Edit Mode' };
+
+  const componentMappings = mappings
+    .filter((m) => Number.isFinite(Number(m.localIndex)))
+    .sort((a, b) => Number(a.localIndex) - Number(b.localIndex));
   if (!componentMappings.length) return { ok: false, error: 'ไม่พบรายการ X-ray Land ใน Component นี้' };
 
   const indexByGlobal = landIndexByGlobalId(component);
   const anchors = componentMappings
     .filter((mapping) => mapping.anchorLocked && mapping.mapped && indexByGlobal.has(Number(mapping.globalId)))
-    .map((mapping) => ({ mapping, localIndex: Number(mapping.localIndex), cadIndex: indexByGlobal.get(Number(mapping.globalId)) }));
+    .map((mapping) => ({ mapping, localIndex: Number(mapping.localIndex), cadIndex: indexByGlobal.get(Number(mapping.globalId)) }))
+    .sort((a, b) => a.localIndex - b.localIndex);
+  if (anchors.length < 2) return { ok: false, error: 'Safe Pattern ต้องใช้ Anchor ที่ยืนยันแล้วอย่างน้อย 2 จุด' };
 
-  const forwardFit = fitDirection(anchors, 'forward', component.lands.length);
-  const reverseFit = fitDirection(anchors, 'reverse', component.lands.length);
-  let fit;
-  if (direction === 'forward') fit = forwardFit;
-  else if (direction === 'reverse') fit = reverseFit;
-  else fit = reverseFit.totalResidual < forwardFit.totalResidual ? reverseFit : forwardFit;
-
-  const shift = Number.isFinite(Number(userShift)) ? Math.trunc(Number(userShift)) : 0;
   const range = normalizeRange(componentMappings, startLocal, endLocal);
-  const anchorGlobalIds = new Map(anchors.map((anchor) => [anchor.localIndex, Number(anchor.mapping.globalId)]));
-  const lockedTargetOwners = new Map(anchors.map((anchor) => [anchor.cadIndex, anchor.mapping]));
-  const fixedTargetOwners = new Map();
-  for (const fixed of componentMappings) {
-    const local = Number(fixed.localIndex);
-    if (local >= range.start && local <= range.end) continue;
-    if (!fixed.mapped || !indexByGlobal.has(Number(fixed.globalId))) continue;
-    fixedTargetOwners.set(indexByGlobal.get(Number(fixed.globalId)), fixed);
-  }
-  const proposedTargetOwners = new Map();
-  const proposals = [];
-  let outOfRange = 0;
-  let conflicts = 0;
-  let highConfidence = 0;
-  let review = 0;
-
-  const baseConfidence = anchors.length >= 2
-    ? (fit.maxResidual === 0 ? 98 : fit.maxResidual <= 1 ? 88 : 70)
-    : anchors.length === 1 ? 84 : 65;
-
-  for (const mapping of componentMappings) {
-    const localIndex = Number(mapping.localIndex);
-    if (localIndex < range.start || localIndex > range.end) continue;
-    let targetIndex = fit.direction === 'reverse'
-      ? fit.constant - (localIndex - 1) + shift
-      : (localIndex - 1) + fit.constant + shift;
-    targetIndex = Math.trunc(targetIndex);
-    const isAnchor = Boolean(mapping.anchorLocked && mapping.mapped && indexByGlobal.has(Number(mapping.globalId)));
-    const actualAnchorIndex = isAnchor ? indexByGlobal.get(Number(mapping.globalId)) : null;
-    let status = 'suggested';
-    let reason = '';
-
-    if (isAnchor && preserveAnchors) {
-      if (actualAnchorIndex !== targetIndex) {
-        status = 'anchor-conflict';
-        reason = `สูตรเสนอ index ${targetIndex + 1} แต่ Anchor อยู่ index ${actualAnchorIndex + 1}`;
-        conflicts += 1;
-      }
-      targetIndex = actualAnchorIndex;
-    }
-    const land = component.lands[targetIndex] || null;
-    if (!land) {
-      outOfRange += 1;
-      proposals.push({ mapping, localIndex, targetIndex, land: null, status: 'out-of-range', confidence: 0, reason: 'ตำแหน่งเกินขอบเขต CAD' });
+  const segments = [];
+  const rejectedSegments = [];
+  for (let i = 0; i < anchors.length - 1; i += 1) {
+    const a = anchors[i];
+    const b = anchors[i + 1];
+    const localDelta = b.localIndex - a.localIndex;
+    const cadDelta = b.cadIndex - a.cadIndex;
+    if (localDelta <= 0 || Math.abs(cadDelta) !== localDelta) {
+      rejectedSegments.push({ a, b, reason: `ช่วง ${a.localIndex}–${b.localIndex} ไม่ใช่ลำดับ CAD ต่อเนื่อง` });
       continue;
     }
-    const lockedOwner = lockedTargetOwners.get(targetIndex);
-    if (lockedOwner && lockedOwner !== mapping && !isAnchor) {
-      status = 'conflict'; reason = `ชนกับ Anchor X-ray ${lockedOwner.localIndex}`; conflicts += 1;
+    const step = Math.sign(cadDelta);
+    const segmentDirection = directionName(step);
+    if (direction !== 'auto' && direction !== segmentDirection) {
+      rejectedSegments.push({ a, b, reason: `ช่วง ${a.localIndex}–${b.localIndex} เป็น ${segmentDirection} ไม่ตรงกับค่าที่เลือก` });
+      continue;
     }
-    const fixedOwner = fixedTargetOwners.get(targetIndex);
-    if (fixedOwner && fixedOwner !== mapping && status === 'suggested') {
-      status = 'conflict'; reason = `ชนกับ X-ray ${fixedOwner.localIndex} ที่อยู่นอกช่วง Preview`; conflicts += 1;
-    }
-    const proposedOwner = proposedTargetOwners.get(targetIndex);
-    if (proposedOwner && proposedOwner !== mapping) {
-      status = 'conflict'; reason = `ตำแหน่งซ้ำกับ X-ray ${proposedOwner.localIndex}`; conflicts += 1;
-    } else proposedTargetOwners.set(targetIndex, mapping);
+    segments.push({ a, b, step, direction: segmentDirection });
+  }
+  if (!segments.length) return { ok: false, error: 'Anchor ยังไม่พิสูจน์ลำดับต่อเนื่อง ไม่มีช่วงที่ปลอดภัยให้เติมอัตโนมัติ' };
 
-    const anchorExpected = anchorGlobalIds.get(localIndex);
-    if (anchorExpected != null && Number(land.globalId) !== anchorExpected) {
-      status = 'anchor-conflict'; reason = 'ผล Preview ไม่ตรงกับ Anchor ที่ล็อกไว้'; conflicts += 1;
+  const mappingByLocal = new Map(componentMappings.map((mapping) => [Number(mapping.localIndex), mapping]));
+  const verifiedTargetOwners = new Map();
+  for (const mapping of componentMappings) {
+    if ((mapping.verified || mapping.anchorLocked) && mapping.mapped && indexByGlobal.has(Number(mapping.globalId))) {
+      verifiedTargetOwners.set(indexByGlobal.get(Number(mapping.globalId)), mapping);
     }
-    const confidence = isAnchor ? 100 : status === 'suggested' ? baseConfidence : 0;
-    if (confidence >= 95) highConfidence += 1;
-    else if (confidence > 0) review += 1;
-    proposals.push({ mapping, localIndex, targetIndex, land, status: isAnchor ? (status === 'anchor-conflict' ? status : 'anchor') : status, confidence, reason });
   }
 
-  const formula = fit.direction === 'reverse'
-    ? `CAD index = ${fit.constant + 1}${shift ? ` ${shift > 0 ? '+' : '-'} ${Math.abs(shift)}` : ''} − (X-ray Land − 1)`
-    : `CAD index = (X-ray Land − 1) + ${fit.constant}${shift ? ` ${shift > 0 ? '+' : '-'} ${Math.abs(shift)}` : ''}`;
+  const proposalByLocal = new Map();
+  let conflicts = 0;
+  for (const segment of segments) {
+    const low = Math.max(segment.a.localIndex, range.start);
+    const high = Math.min(segment.b.localIndex, range.end);
+    for (let localIndex = low; localIndex <= high; localIndex += 1) {
+      const mapping = mappingByLocal.get(localIndex);
+      if (!mapping) continue;
+      const targetIndex = segment.a.cadIndex + segment.step * (localIndex - segment.a.localIndex);
+      const land = component.lands[targetIndex] || null;
+      const isAnchor = Boolean(mapping.anchorLocked && mapping.mapped);
+      let status = isAnchor ? 'anchor' : 'suggested';
+      let reason = isAnchor ? 'Anchor ที่ผู้ใช้ยืนยัน' : 'อยู่ระหว่าง Anchor สองจุดและลำดับตรงกันแบบพอดี';
+
+      const verifiedOwner = verifiedTargetOwners.get(targetIndex);
+      if (verifiedOwner && verifiedOwner !== mapping) {
+        status = 'conflict';
+        reason = `ชนกับจุดยืนยัน X-ray ${verifiedOwner.localIndex}`;
+        conflicts += 1;
+      }
+
+      const existing = proposalByLocal.get(localIndex);
+      if (existing && existing.targetIndex !== targetIndex) {
+        existing.status = 'conflict';
+        existing.reason = 'Anchor หลายช่วงเสนอคนละตำแหน่ง';
+        conflicts += 1;
+        continue;
+      }
+      proposalByLocal.set(localIndex, {
+        mapping,
+        localIndex,
+        targetIndex,
+        land,
+        status,
+        confidence: isAnchor ? 100 : status === 'suggested' ? 96 : 0,
+        reason,
+      });
+    }
+  }
+
+  const proposals = [...proposalByLocal.values()].sort((a, b) => a.localIndex - b.localIndex);
+  const directions = new Set(segments.map((segment) => segment.direction));
+  const resolvedDirection = directions.size === 1 ? [...directions][0] : 'mixed';
+  const highConfidence = proposals.filter((p) => p.status === 'suggested' && p.confidence >= 95).length;
+  const applicable = proposals.filter((p) => p.land && ['suggested', 'anchor'].includes(p.status)).length;
+  const formula = `Safe segment fill: เติมเฉพาะ ${segments.length} ช่วงระหว่าง Anchor ที่ลำดับ CAD ต่อเนื่องตรงกัน 100% และไม่ขยายออกนอก Anchor`;
 
   return {
-    ok: true, anchors, fit, direction: fit.direction, shift, range, formula, proposals,
+    ok: true,
+    anchors,
+    segments,
+    rejectedSegments,
+    fit: { maxResidual: 0, segments: segments.length },
+    direction: resolvedDirection,
+    shift: 0,
+    range,
+    formula,
+    proposals,
     counts: {
       total: proposals.length,
       anchors: anchors.length,
       highConfidence,
-      review,
+      review: 0,
       conflicts,
-      outOfRange,
-      applicable: proposals.filter((p) => p.land && !['conflict', 'anchor-conflict'].includes(p.status)).length,
+      outOfRange: 0,
+      applicable,
+      segments: segments.length,
+      rejectedSegments: rejectedSegments.length,
     },
   };
 }
@@ -216,6 +209,9 @@ export function findLandIndex(component, globalId) {
 }
 
 export function getAnchorRange(mappings) {
-  const locals = mappings.filter((m) => m.anchorLocked && Number.isFinite(Number(m.localIndex))).map((m) => Number(m.localIndex)).sort((a, b) => a - b);
+  const locals = mappings
+    .filter((m) => m.anchorLocked && Number.isFinite(Number(m.localIndex)))
+    .map((m) => Number(m.localIndex))
+    .sort((a, b) => a - b);
   return locals.length < 2 ? null : { start: locals[0], end: locals[locals.length - 1] };
 }

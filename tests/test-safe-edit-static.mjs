@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const app = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+assert(html.includes('id="editAutoNext"'));
+assert(html.includes('id="editLockConfirmed"'));
+assert(html.includes('id="verifiedStat"'));
+assert(app.includes("mappingMethod: 'manual-direct'"));
+assert(app.includes("mappingMethod: 'pattern-suggestion'"));
+assert(app.includes('ignoredGenerated'));
+assert(!app.includes("mappingMethod: `taught-${preview.direction}`"));
+console.log('safe edit static checks passed');

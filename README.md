@@ -1,76 +1,45 @@
-# BGA Land Mapper PWA v0.5.0
+# BGA Land Mapper PWA v0.6.0
 
-PWA สำหรับเปิด CAD XML และผลตรวจ X-ray XLSX, จับคู่หมายเลข Land, แสดงตำแหน่งบน CAD และวิเคราะห์ Measurement โดยประมวลผลภายในเบราว์เซอร์
+PWA สำหรับเปิด CAD XML และข้อมูล X-ray XLSX/ZIP แล้วแสดงตำแหน่ง Land บนกราฟิก โดยเวอร์ชันนี้เปลี่ยนลอจิกเป็น Safe Mapping เพื่อไม่ยืนยัน Mapping จากลำดับ XML โดยอัตโนมัติ
 
+## สิ่งที่แก้ใน v0.6.0
 
-## อัปเดต v0.5.0 — Duplicate CAD Visualization
+- ลำดับ XML เป็นเพียง `Auto guess / Unverified` ไม่ถือว่า Mapping ถูกต้อง
+- จุดที่ถือว่า `Confirmed` ต้องมาจากการคลิกใน Edit Mode หรือ Manual Anchor ที่ผู้ใช้ยืนยัน
+- ตัดการกระจาย `taught-forward` แบบทั้งชุด
+- Pattern เติมได้เฉพาะช่วงระหว่าง Anchor อย่างน้อย 2 จุดที่พิสูจน์ลำดับ +1 หรือ -1 ได้ตรงกันพอดี
+- Pattern ที่ Apply ยังคงเป็นข้อเสนอ ไม่ใช่ Confirmed
+- กู้คืน Backup v0.5.0 แบบปลอดภัย: เก็บ Manual Anchor จริงและหมายเหตุ แต่ละทิ้ง Mapping ที่ระบบกระจายหรือสลับให้เอง
 
-- ไฮไลต์ทุกตำแหน่งที่ใช้ชื่อ CAD ซ้ำบนกราฟิกด้วยวงแหวนสีชมพู
-- เมื่อเลือกชื่อซ้ำ กลุ่มนั้นจะเปลี่ยนเป็นสีเหลืองและมีเส้นประเชื่อมทุกตำแหน่ง
-- แสดงชื่อของกลุ่มที่เลือกบนกราฟิกแม้ยังไม่ได้เปิด Label ทั้งหมด
-- เลือกชื่อซ้ำจากรายการและ Fit ให้เห็นทุกตำแหน่งในครั้งเดียว
-- แสดงรายการ XML ID, X-ray Land และพิกัด X/Y ของแต่ละตำแหน่ง
-- คลิกรายการเพื่อซูมไปยังจุดนั้นได้ทันที
-- เปิดโหมดทำตำแหน่งที่ไม่ซ้ำให้จาง เพื่อเน้นตรวจเฉพาะชื่อซ้ำ
-- Tooltip แสดงจำนวนตำแหน่งเมื่อชื่อ CAD ซ้ำ
-- การตรวจชื่อซ้ำทำภายใน Part ที่เลือกเท่านั้น ชื่อเดียวกันคนละ Part ไม่ถือเป็นความผิดปกติร่วมกัน
+## Fast Edit Mode
 
-## วิธีดูตำแหน่งชื่อ CAD ซ้ำ
+1. เปิดไฟล์ ZIP หรือ XML + XLSX
+2. กด `โหมด Edit`
+3. เลือก X-ray Land จากตารางหรือค้นหาเลข Land
+4. คลิก CAD Land ที่ถูกต้องบนกราฟิก
+5. จุดนั้นจะเป็น Confirmed ทันที
+6. หากเปิด `เลื่อนไป X-ray ถัดไปอัตโนมัติ` โปรแกรมจะเลือกแถวถัดไปให้พร้อมคลิกต่อ
 
-1. นำเข้า ZIP แล้วเลือก Part ที่ต้องการ เช่น `U1`
-2. เปิด `ไฮไลต์ตำแหน่งชื่อ CAD ซ้ำ` เพื่อให้ทุกจุดซ้ำมีวงแหวนสีชมพู
-3. เลือกชื่อจาก `ไปยังชื่อ CAD ซ้ำ` หรือคลิก Land ที่มีคำเตือนชื่อซ้ำ
-4. โปรแกรมจะเปลี่ยนกลุ่มที่เลือกเป็นสีเหลืองและลากเส้นประเชื่อมทุกตำแหน่ง
-5. กด `Fit ทุกตำแหน่ง` เพื่อซูมให้เห็นครบทั้งกลุ่ม
-6. คลิกรายการด้านขวาเพื่อไปยัง XML ID/X-ray Land แต่ละจุด
-7. เปิด `ทำตำแหน่งที่ไม่ซ้ำให้จาง` เมื่อต้องการตรวจเฉพาะกลุ่มชื่อซ้ำ
+เมื่อ CAD Land เป้าหมายถูกใช้โดย Auto guess ของแถวอื่น ระบบจะ Unmap แถวนั้นโดยไม่สลับตำแหน่งเดิมไปให้ เพราะการสลับอัตโนมัติอาจสร้างความผิดพลาดต่อเนื่อง หากเป้าหมายถูก Confirmed อยู่แล้ว ระบบจะถามก่อน
 
-## อัปเดต v0.4.0 — Detailed Histogram
+## สถานะ Mapping
 
-- เพิ่มปุ่มขยาย Histogram แบบเต็มหน้าจอ
-- รองรับ 10–200 bins ในหน้ารายละเอียด
-- สลับแกน Y ระหว่างจำนวน Land และเปอร์เซ็นต์
-- ซูมช่วง Measurement ด้วยล้อเมาส์
-- ลากบนกราฟเพื่อเลือกและขยายช่วงค่า
-- กรอกค่า Min/Max เพื่อดูช่วงที่กำหนดเอง
-- คลิกแท่งเพื่อดูช่วง, Count, Percent และ Cumulative
-- แสดง Total, In-range, Min, Q1, Average, Median, Q3, Max และ Standard deviation
-- แสดงเส้นตำแหน่ง Measurement ของ Land ที่เลือก
-- เน้นเฉพาะ Land ที่อยู่ในช่วง Histogram บน CAD ได้
-- Export ตาราง Histogram ปัจจุบันเป็น CSV
-- รองรับจอ Desktop, Tablet และ Mobile
+- `Confirmed`: ผู้ใช้ยืนยันด้วย Edit Mode/Anchor
+- `Unverified`: Auto order หรือ Pattern suggestion
+- `Unmapped`: ยังไม่มีตำแหน่ง CAD
 
-## ฟังก์ชันเดิม
+## การติดตั้งบน GitHub Pages
 
-- เปิด ZIP ที่มี CAD XML และ X-ray XLSX ได้โดยตรง
-- แสดงเฉพาะ Part ที่พบในข้อมูลดิบ เช่น ข้อมูลมีเพียง U1 จะแสดงเฉพาะ U1
-- รองรับหลาย Part ในข้อมูลดิบ โดยแยก Mapping, Viewer และ Histogram ตาม Part
-- Heatmap จาก Measurement
-- Manual remap, Anchor, Manual Teach, Pattern Preview, Shift และ Unmap
-- Undo/Redo
-- Export Mapping CSV และ Backup JSON
-- ทำงาน Offline หลังติดตั้ง PWA
+อัปโหลดไฟล์ทั้งหมดในโฟลเดอร์นี้ไว้ที่ root ของ repository แล้วเปิด GitHub Pages จาก branch `main` และโฟลเดอร์ `/ (root)` ไม่ต้อง build และไม่ต้องติดตั้ง dependency
 
-## วิธีใช้ Histogram แบบละเอียด
+## ทดสอบ
 
-1. นำเข้าโปรเจกต์และเลือก Part
-2. กดปุ่ม `⛶` ข้าง Histogram หรือคลิกกราฟย่อ
-3. เลือกจำนวน Bins และรูปแบบแกน Y
-4. ใช้ล้อเมาส์เพื่อซูม หรือกดลากบนกราฟเพื่อเลือกช่วง
-5. คลิกแท่งเพื่อดูจำนวนและเปอร์เซ็นต์ของช่วงนั้น
-6. เปิด `เน้นเฉพาะ Measurement ในช่วงที่กำลังดูบน CAD` เพื่อเชื่อมผล Histogram กับตำแหน่ง Land
-7. กด `Export Histogram CSV` เมื่อต้องการนำข้อมูลไปวิเคราะห์ต่อ
-
-## GitHub Pages
-
-อัปโหลดไฟล์และโฟลเดอร์ทั้งหมดไว้ที่ Root ของ Repository แล้วตั้ง `Settings → Pages → Deploy from a branch → main → / (root)` ไม่ต้อง Build หรือ `npm install`
-
-## ผลทดสอบกับไฟล์ตัวอย่าง
-
-- CAD Components: 2,591
-- CAD Lands: 24,625
-- Raw-data Parts: 1 (`U1`)
-- X-ray Lands: 17,662
-- Mapping: 17,662/17,662
-- Measurement: อ่านจากคอลัมน์ T
-- ตัวอย่าง `X-ray 17660 → CAD CU71 → XML ID 18572`
+```bash
+node tests/test-app-smoke.mjs
+node tests/test-static.mjs
+node tests/test-safe-edit-static.mjs
+node tests/test-manual-pattern.mjs
+node tests/test-parsers.mjs /path/to/project.zip
+node tests/test-duplicates.mjs /path/to/project.zip
+node tests/test-raw-part-filter.mjs
+```

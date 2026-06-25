@@ -245,3 +245,25 @@ tbody tr.preview-row { background: rgba(43,167,255,.06); }
 .duplicate-position-index { min-width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid rgba(255,91,211,.28); border-radius: 50%; color: #ffd0f2; font-size: 9px; }
 .duplicate-panel-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 8px; }
 .duplicate-panel-actions button { font-size: 10px; }
+
+/* v0.6.0 Safe mapping and fast edit mode */
+.dot.confirmed { background: #66e39f; box-shadow: 0 0 0 2px rgba(102,227,159,.2); }
+#manualButton.edit-active { color: #dfffee; border-color: rgba(102,227,159,.62); background: rgba(34,129,84,.3); }
+.edit-panel { z-index: 8; width: min(330px, calc(100% - 24px)); max-width: 330px; padding: 12px; color: #e7fff2; background: rgba(10,54,37,.95); border-color: rgba(102,227,159,.52); box-shadow: 0 16px 42px rgba(0,0,0,.35); }
+.edit-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+.edit-panel-heading strong { color: #8ef0b8; font-size: 10px; letter-spacing: .14em; }
+.edit-close { width: 26px; height: 26px; padding: 0; border-radius: 8px; }
+.edit-panel > span { display: block; color: #fff; font-size: 12px; font-weight: 800; line-height: 1.35; }
+.edit-panel > small { display: block; margin-top: 5px; color: #b6d8c5; line-height: 1.45; }
+.edit-panel-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 9px; }
+.edit-panel-actions button { padding: 7px 8px; font-size: 10px; }
+.edit-toggle { display: grid; grid-template-columns: 16px 1fr; align-items: center; gap: 7px; margin-top: 8px; color: #cce8d8; font-size: 10px; }
+.edit-toggle input { width: 14px; }
+.status-chip.verified { color: #bff8d4; border-color: rgba(102,227,159,.42); background: rgba(102,227,159,.1); }
+.status-chip.unverified { color: #ffe0a8; border-color: rgba(255,189,91,.34); background: rgba(255,189,91,.07); }
+tbody tr.verified-row { box-shadow: inset 3px 0 0 #66e39f; }
+tbody tr.unverified-row { box-shadow: inset 2px 0 0 rgba(255,189,91,.38); }
+@media (max-width: 620px) {
+  .edit-panel { top: 8px; right: 8px; left: 8px; width: auto; max-width: none; }
+  .legend { flex-wrap: wrap; max-width: calc(100% - 24px); }
+}
