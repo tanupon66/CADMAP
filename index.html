@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
-  <title>BGA Land Mapper v0.8.0</title>
+  <title>BGA Land Mapper v0.9.0</title>
 </head>
 <body>
   <header class="topbar">
@@ -120,6 +120,7 @@
           <button id="undoButton" type="button" disabled>Undo</button>
           <button id="redoButton" type="button" disabled>Redo</button>
           <button id="exportCsvButton" type="button" disabled>Export CSV</button>
+          <button id="exportExcelButton" class="primary" type="button" disabled>Component Excel</button>
           <button id="exportJsonButton" type="button" disabled>Backup JSON</button>
         </div>
       </div>
@@ -342,6 +343,70 @@
           </div>
           <p class="helper-text">Safe Pattern ไม่ขยายออกนอก Anchor และผลที่ Apply ยังไม่ถือว่า Confirmed จนกว่าจะคลิกยืนยันใน Edit Mode</p>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="componentReportOverlay" class="modal-overlay component-report-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="componentReportTitle">
+    <div class="component-report-dialog panel">
+      <header class="cad-inspector-header">
+        <div>
+          <span class="eyebrow">COMPONENT EXCEL REPORT</span>
+          <h2 id="componentReportTitle">สร้าง Excel พร้อมรูป Component</h2>
+          <p>สร้างภาพรวมตามพิกัด CAD ภาพขยายรายโซน ตาราง Land และ Histogram ในไฟล์ .xlsx เดียว</p>
+        </div>
+        <button id="closeComponentReportButton" class="icon-button" type="button" aria-label="ปิด">✕</button>
+      </header>
+
+      <div class="component-report-options">
+        <label>Component ที่ส่งออก
+          <select id="componentReportScope">
+            <option value="current">เฉพาะ Component ที่กำลังดู</option>
+            <option value="raw">ทุก Part ที่พบในข้อมูลดิบ</option>
+          </select>
+        </label>
+        <label>แบ่งภาพเป็นโซน
+          <select id="componentReportZones">
+            <option value="2">2 × 2</option>
+            <option value="3" selected>3 × 3</option>
+            <option value="4">4 × 4 (ละเอียดที่สุด)</option>
+          </select>
+        </label>
+        <label>ข้อความบนภาพขยาย
+          <select id="componentReportLabels">
+            <option value="cad">ชื่อ CAD</option>
+            <option value="xray">หมายเลข X-ray Land</option>
+            <option value="both" selected>ชื่อ CAD + X-ray Land</option>
+            <option value="none">ไม่แสดงข้อความ</option>
+          </select>
+        </label>
+        <label>ชื่อ CAD ที่ใช้ในรายงาน
+          <select id="componentReportNameSource">
+            <option value="active">CAD ที่กำลังแสดง</option>
+            <option value="original">Original CAD</option>
+            <option value="generated">Generated CAD</option>
+          </select>
+        </label>
+        <label>ความละเอียดภาพ
+          <select id="componentReportResolution">
+            <option value="1600">มาตรฐาน</option>
+            <option value="2200" selected>ละเอียด</option>
+            <option value="3000">ละเอียดสูง</option>
+          </select>
+        </label>
+        <label class="toggle-row component-report-toggle"><input id="componentReportHeatmap" type="checkbox" checked /><span>ใช้สี Heatmap จาก Measurement</span></label>
+      </div>
+
+      <div class="component-report-preview">
+        <div><span>Component</span><strong id="componentReportPartCount">0</strong></div>
+        <div><span>Land</span><strong id="componentReportLandCount">0</strong></div>
+        <div><span>Zone sheets</span><strong id="componentReportZoneCount">0</strong></div>
+        <div><span>Measurement</span><strong id="componentReportMeasurementCount">0</strong></div>
+      </div>
+      <p id="componentReportMessage" class="helper-text">เลือก Component และรูปแบบรายงาน จากนั้นกดสร้าง Excel</p>
+      <div class="component-report-actions">
+        <button id="cancelComponentReportButton" type="button">ยกเลิก</button>
+        <button id="generateComponentReportButton" class="primary" type="button">สร้าง Component Report Excel</button>
       </div>
     </div>
   </div>

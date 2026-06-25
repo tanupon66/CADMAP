@@ -1,35 +1,53 @@
-# ผลทดสอบ BGA Land Mapper v0.8.0
+# ผลทดสอบ BGA Land Mapper v0.9.0
 
-## ไฟล์ CAD ตัวอย่าง
+## ข้อมูลจริงที่ใช้ทดสอบ
 
-- Components: 2,591
-- Lands: 24,625
+- CAD Components: 2,591
+- CAD Lands: 24,625
 - Raw-data Part: U1
 - X-ray Lands: 17,662
+- Measurement column: T
+- Mapping rows: 17,662
 
-## ทดสอบเปิด CAD อย่างเดียว
+## Component Report Excel
 
-โปรแกรมสามารถอ่าน XML, สร้างรายการ Component และเลือก U1 ซึ่งมี Land มากที่สุดเพื่อแสดงกราฟิกได้โดยไม่ต้องนำเข้า XLSX
+ทดสอบสร้างรายงาน U1 โดยแบ่ง 2×2 โซน:
 
-## ทดสอบ Generated CAD
+- Summary: 1 ชีต
+- Component Map: 1 ชีต
+- Land Data: 17,662 แถวข้อมูล
+- Zone detail: 4 ชีต รวมข้อมูล Land ครบ 17,662 จุด
+- Histogram: 50 bins
+- Duplicate Names: 2,338 ตำแหน่ง
+- รวม 9 ชีต
 
-สร้าง Generated CAD จาก CAD Name Inspector โดยรักษาชื่อที่ผ่านแล้วและเปลี่ยนชื่อซ้ำหลังตำแหน่งแรก:
+ไฟล์ทดสอบที่มี 17,662 Land มีขนาดประมาณ 3.7 MB หลังบีบอัด XLSX และสามารถอ่านกลับด้วย XLSX Parser ของโปรแกรมได้ครบ:
 
-- ชื่อที่ถูกสร้างใหม่: 1,169 จุด
-- Land ผ่านหลังแก้: 24,625 / 24,625
-- ชื่อซ้ำหลังแก้: 0
-- ชื่อเกิน 5 ตัวอักษร: 0
+- `Data U1`: 17,665 แถวรวมชื่อเรื่องและ Header
+- Zone A1: 4,392 Land
+- Zone A2: 4,424 Land
+- Zone B1: 4,407 Land
+- Zone B2: 4,439 Land
 
-## ทดสอบ Original ↔ Generated CAD
+## การตรวจโครงสร้าง XLSX
 
-ผล CAD Compare:
+ทดสอบไฟล์ขนาดเล็กด้วย Spreadsheet parser ภายนอกและตรวจพบ:
 
-- Components จับคู่: 2,591 / 2,591
-- Lands จับคู่: 24,625 / 24,625
-- ชื่อที่เปลี่ยน: 1,169
-- ตำแหน่งที่ขยับ: 0
-- หายใน Generated CAD: 0
-- เกินมาใน Generated CAD: 0
-- Land ไม่เปลี่ยน: 23,456
+- Sheet names ถูกต้อง
+- Summary และตารางข้อมูลอ่านได้
+- รูปภาพถูกฝังใน `xl/media`
+- Internal hyperlinks ถูกสร้าง
+- ไม่พบ Formula error หรือ Reference เสีย
 
-ระบบจับคู่ชุดทดสอบด้วย XML ID ครบทุกจุด และมีการทดสอบเพิ่มเติมว่าหาก XML ID เปลี่ยนแต่พิกัดยังตรงกัน ระบบสามารถจับคู่ด้วยพิกัดแทนได้
+## Regression tests
+
+ผ่านการทดสอบ:
+
+- XML/XLSX Parser กับไฟล์จริง
+- Raw-data Part filter
+- ชื่อ CAD ซ้ำ 1,169 กลุ่ม / 2,338 ตำแหน่ง
+- Safe Edit Mode
+- CAD Name Inspector และ Export XML
+- Original ↔ Generated CAD comparison 24,625 / 24,625 Land
+- Component Report static UI
+- XLSX ZIP writer, images, sheets และ parser round-trip

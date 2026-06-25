@@ -1,81 +1,57 @@
-# BGA Land Mapper PWA v0.8.0
+# BGA Land Mapper PWA v0.9.0
 
-PWA แบบ Static สำหรับเปิด CAD XML, เปรียบเทียบ Original CAD กับ Generated CAD, จับคู่ชื่อ Land, แสดง BGA, วิเคราะห์ Measurement และแก้ Mapping ภายในเบราว์เซอร์
+PWA แบบ Static สำหรับเปิด CAD XML, เปรียบเทียบ Original CAD กับ Generated CAD, จับคู่ Land, ตรวจชื่อ CAD, วิเคราะห์ Measurement และสร้างรายงาน Excel พร้อมภาพตำแหน่ง Component ภายในเบราว์เซอร์
 
-## ฟังก์ชันใหม่ v0.8.0
+## ฟังก์ชันใหม่ v0.9.0 — Component Report Excel
 
-### เปิด CAD อย่างเดียวได้ทันที
+กด **Component Excel** หลังนำเข้า CAD โปรแกรมสามารถสร้างไฟล์ `.xlsx` โดยไม่ต้องส่งข้อมูลขึ้นเซิร์ฟเวอร์
 
-- กด **Original CAD** หรือวาง XML ในพื้นที่ Import
-- โปรแกรมอ่าน Component และ Land แล้วแสดงกราฟิกทันที
-- ไม่จำเป็นต้องมี XLSX
-- หาก CAD มีหลาย Part โปรแกรมเลือก Part ที่มี Land มากที่สุดก่อน และสามารถสลับ Part จากเมนู Component
-- เมื่อเพิ่ม XLSX ภายหลัง โปรแกรมจึงสร้าง Mapping กับข้อมูลดิบ
+### ขอบเขตรายงาน
 
-### Original CAD ↔ Generated CAD
+- เฉพาะ Component ที่กำลังแสดง
+- ทุก Part ที่พบในข้อมูลดิบ XLSX
+- ใช้งานได้เมื่อเปิด CAD XML เพียงไฟล์เดียว แม้ยังไม่มีข้อมูล X-ray
 
-1. อัปโหลดไฟล์ต้นฉบับด้วยปุ่ม **Original CAD**
-2. อัปโหลด XML ที่แก้ชื่อแล้วด้วยปุ่ม **Generated CAD**
-3. กด **เปรียบเทียบ CAD**
+### ตัวเลือกรายงาน
 
-ระบบจับคู่ตามลำดับความน่าเชื่อถือ:
+- แบ่งภาพ Component เป็น 2×2, 3×3 หรือ 4×4 โซน
+- เลือกข้อความบนภาพขยาย: ชื่อ CAD, หมายเลข X-ray Land, ทั้งสองอย่าง หรือไม่แสดงข้อความ
+- เลือกชื่อจาก CAD ที่กำลังดู, Original CAD หรือ Generated CAD
+- เลือกความละเอียดภาพ Standard, Detail หรือ High Detail
+- เปิด/ปิด Measurement Heatmap
 
-1. Component ID ที่ชื่อหรือ Package สอดคล้องกัน
-2. Component name + Package
-3. Component name
-4. Package + จำนวน Land
-5. Land XML ID
-6. พิกัดใกล้ที่สุดภายในค่าความคลาดเคลื่อนที่กำหนด
+### ชีตที่สร้าง
 
-ผลลัพธ์แยกเป็น:
+- `Summary` — สรุป Board, CAD, X-ray และลิงก์ไปยังชีตแต่ละ Component
+- `Map <Part>` — ภาพรวม Component ตามพิกัด CAD พร้อมเส้นแบ่งโซน
+- `Data <Part>` — ตารางข้อมูล Land ทุกจุด
+- `<Part> Zone A1...` — ภาพขยายแต่ละโซนและข้อมูล Land ภายในโซน
+- `Histogram <Part>` — ภาพ Histogram, สถิติ และข้อมูลแต่ละ Bin
+- `CAD Name Changes` — ตารางชื่อ Original ↔ Generated เมื่อชื่อแตกต่างกัน
+- `Duplicate Names` — รายการตำแหน่งที่ชื่อ CAD ซ้ำ
 
-- ตรงกัน
-- เปลี่ยนชื่อ
-- ตำแหน่งเปลี่ยน
-- เปลี่ยนทั้งชื่อและตำแหน่ง
-- หายใน Generated CAD
-- เกินมาใน Generated CAD
+ตาราง Land ประกอบด้วย Part, Package, Zone, Local index, X-ray Land, XML ID, ชื่อ CAD, ชื่อ Original, ชื่อ Generated, พิกัด X/Y, ขนาด, Measurement, Confirmed และสถานะ Mapping
 
-สามารถค้นหา กรอง ดูคู่บนกราฟิก และ Export ตาราง Mapping เป็น CSV ได้
+### การนำทางใน Excel
 
-### Overlay บนกราฟิก
-
-เปิด **ซ้อน Original ↔ Generated** เพื่อแสดงสองไฟล์พร้อมกัน:
-
-- สีฟ้าอมเขียว = ตำแหน่ง Original
-- สีชมพู = ตำแหน่ง Generated
-- เส้นประ = Land คู่เดียวกันที่ตำแหน่งขยับ
-- เลือกรายการในตารางเปรียบเทียบเพื่อ Fit และแสดงชื่อเดิม → ชื่อใหม่
-
-### สลับ CAD ที่กำลังดู
-
-เมนู **CAD ที่แสดง** รองรับ:
-
-- Original CAD
-- Generated CAD
-
-เมื่อสลับไฟล์ Viewer, Component list, CAD Name Inspector และ Mapping กับ XLSX จะอัปเดตตาม CAD ที่เลือก
-
-## CAD Name Inspector
-
-- ตรวจชื่อซ้ำภายใน Part
-- ตรวจชื่อว่างและชื่อเกินความยาว ค่าเริ่มต้น 5 ตัวอักษร
-- แก้ชื่อเองหรือสร้างชื่อใหม่อัตโนมัติ
-- Apply ชื่อใหม่บนกราฟิก
-- Export รายงาน CSV
-- Export CAD XML ฉบับแก้ไขโดยไม่เขียนทับไฟล์ต้นฉบับ
+- คลิกชื่อ Map/Data ใน Summary เพื่อไปยังชีตนั้น
+- คลิก Zone ใน `Data <Part>` เพื่อเปิดภาพขยายของโซน
+- คลิกชื่อชีต Zone ในหน้า Map เพื่อดูบริเวณนั้นโดยตรง
 
 ## ฟังก์ชันเดิม
 
-- อ่าน ZIP ที่มี XML + XLSX หรือเปิดไฟล์แยก
+- เปิด CAD XML อย่างเดียวและแสดงกราฟิกทันที
+- อัปโหลด Original CAD และ Generated CAD แยกกัน
+- เปรียบเทียบชื่อ พิกัด Land ที่หายและ Land ที่เกิน
+- CAD Name Inspector สำหรับชื่อซ้ำ ชื่อว่าง และชื่อเกิน 5 ตัวอักษร
+- Export CAD XML ฉบับแก้ไขโดยรักษาข้อมูลอื่นไว้
 - Measurement Histogram แบบละเอียด
 - แสดงชื่อ CAD ซ้ำบนกราฟิก
-- Fast Edit Mode สำหรับยืนยัน Mapping ทีละจุด
-- Safe Pattern ระหว่าง Anchor
+- Fast Edit Mode และ Safe Pattern
 - Backup/Restore JSON
 - Export Mapping CSV
 - PWA Offline บน GitHub Pages
 
 ## Deploy บน GitHub Pages
 
-อัปโหลดไฟล์ภายในโฟลเดอร์ `bga-land-mapper` ไปยัง root ของ repository แล้วเปิด GitHub Pages จาก branch `main` และโฟลเดอร์ `/ (root)` ไม่ต้อง build หรือ npm install
+อัปโหลดไฟล์ภายในโฟลเดอร์นี้ไปยัง root ของ repository แล้วเปิด GitHub Pages จาก branch `main` และโฟลเดอร์ `/ (root)` ไม่ต้อง build หรือ `npm install`

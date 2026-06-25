@@ -24,6 +24,8 @@ import {
   rewriteCadXml,
 } from './cad-inspector.js';
 import { buildCadComparison, cadComparisonToCsv } from './cad-compare.js';
+import { buildComponentReportXlsx } from './xlsx-report.js';
+import { buildZones, canvasToPngBytes, histogramModel, renderHistogramImage, renderOverviewImage, renderZoneImage } from './component-report.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -39,7 +41,7 @@ const els = {
   duplicateToggle: $('duplicateToggle'), duplicateOnlyToggle: $('duplicateOnlyToggle'), cadCompareOverlayToggle: $('cadCompareOverlayToggle'), duplicateNameSelect: $('duplicateNameSelect'), duplicateSummaryMini: $('duplicateSummaryMini'),
   fitButton: $('fitButton'), zoomInButton: $('zoomInButton'), zoomOutButton: $('zoomOutButton'),
   searchInput: $('searchInput'), searchButton: $('searchButton'), cadInspectorButton: $('cadInspectorButton'), cadCompareButton: $('cadCompareButton'), manualButton: $('manualButton'), teachButton: $('teachButton'),
-  undoButton: $('undoButton'), redoButton: $('redoButton'), exportCsvButton: $('exportCsvButton'), exportJsonButton: $('exportJsonButton'),
+  undoButton: $('undoButton'), redoButton: $('redoButton'), exportCsvButton: $('exportCsvButton'), exportExcelButton: $('exportExcelButton'), exportJsonButton: $('exportJsonButton'),
   canvas: $('cadCanvas'), viewerTitle: $('viewerTitle'), viewerSubtitle: $('viewerSubtitle'), tooltip: $('tooltip'), manualBanner: $('manualBanner'),
   editCurrentLabel: $('editCurrentLabel'), exitEditButton: $('exitEditButton'), editPrevButton: $('editPrevButton'), editNextButton: $('editNextButton'), editAutoNext: $('editAutoNext'), editLockConfirmed: $('editLockConfirmed'),
   tableFilter: $('tableFilter'), mappingTableBody: $('mappingTableBody'), tableSummary: $('tableSummary'), prevPage: $('prevPage'), nextPage: $('nextPage'), pageLabel: $('pageLabel'),
@@ -72,6 +74,9 @@ const els = {
   previewTitle: $('previewTitle'), previewDirectionBadge: $('previewDirectionBadge'), previewApplicable: $('previewApplicable'), previewHigh: $('previewHigh'), previewReview: $('previewReview'), previewConflict: $('previewConflict'),
   previewFormula: $('previewFormula'), previewWarning: $('previewWarning'), applyPatternButton: $('applyPatternButton'), applyHighButton: $('applyHighButton'),
   previewForwardButton: $('previewForwardButton'), previewReverseButton: $('previewReverseButton'), shiftAllPrevButton: $('shiftAllPrevButton'), shiftAllNextButton: $('shiftAllNextButton'), unmapRangeButton: $('unmapRangeButton'),
+  componentReportOverlay: $('componentReportOverlay'), closeComponentReportButton: $('closeComponentReportButton'), cancelComponentReportButton: $('cancelComponentReportButton'),
+  componentReportScope: $('componentReportScope'), componentReportZones: $('componentReportZones'), componentReportLabels: $('componentReportLabels'), componentReportNameSource: $('componentReportNameSource'), componentReportResolution: $('componentReportResolution'), componentReportHeatmap: $('componentReportHeatmap'),
+  componentReportPartCount: $('componentReportPartCount'), componentReportLandCount: $('componentReportLandCount'), componentReportZoneCount: $('componentReportZoneCount'), componentReportMeasurementCount: $('componentReportMeasurementCount'), componentReportMessage: $('componentReportMessage'), generateComponentReportButton: $('generateComponentReportButton'),
   toast: $('toast'), installButton: $('installButton'),
 };
 
@@ -792,7 +797,7 @@ function updateStats() {
   els.projectStatus.className = `status-pill ${state.xmlData ? 'ready' : 'muted'}`;
   els.remapButton.disabled = !state.xmlData || !state.xlsxData;
   els.cadInspectorButton.disabled = !state.xmlData;
-  els.exportCsvButton.disabled = !ready; els.exportJsonButton.disabled = !state.xmlData; els.restoreButton.disabled = !state.xmlData; els.teachButton.disabled = !ready;
+  els.exportCsvButton.disabled = !ready; els.exportExcelButton.disabled = !state.xmlData; els.exportJsonButton.disabled = !state.xmlData; els.restoreButton.disabled = !state.xmlData; els.teachButton.disabled = !ready;
   els.manualButton.disabled = !ready;
   populateActiveCadSelect(); updateCadCompareControls(); refreshHistoryButtons();
 }
@@ -867,7 +872,7 @@ function resetProject() {
     cadInspector: { renames: new Map(), maxLength: 5, prefix: 'L', scope: 'all', filter: 'issues', search: '', page: 1, pageSize: 120, audit: null },
   });
   resetHistogramState();
-  for (const overlay of [els.histogramOverlay, els.cadInspectorOverlay, els.cadCompareOverlay, els.teachOverlay]) overlay.classList.add('hidden');
+  for (const overlay of [els.histogramOverlay, els.cadInspectorOverlay, els.cadCompareOverlay, els.componentReportOverlay, els.teachOverlay]) overlay.classList.add('hidden');
   els.duplicateToggle.checked = true; els.duplicateOnlyToggle.checked = false; els.cadCompareOverlayToggle.checked = false;
   syncCadFileLabels(); els.importMessage.textContent = 'ไฟล์จะถูกประมวลผลในเครื่อง ไม่อัปโหลดไปยังเซิร์ฟเวอร์';
   for (const select of [els.componentColumn, els.packageColumn, els.landColumn, els.measurementColumn, els.componentSelect, els.activeCadSelect]) select.innerHTML = '';
@@ -1560,12 +1565,154 @@ function unmapRange() {
   const targets = currentMappings().filter((m) => Number(m.localIndex) >= Math.min(start, end) && Number(m.localIndex) <= Math.max(start, end) && !m.anchorLocked && m.mapped);
   if (!targets.length) return toast('ไม่มีรายการในช่วงที่สามารถ Unmap ได้'); if (!window.confirm(`Unmap ${targets.length} จุดในช่วงนี้ โดยรักษา Anchor ไว้ใช่หรือไม่?`)) return; applyTransaction('Unmap range', targets.map((mapping) => ({ mapping, before: snapshotMapping(mapping), after: stateForUnmapped(mapping) }))); toast(`Unmap แล้ว ${formatInt.format(targets.length)} จุด`);
 }
+
+function counterpartComponent(role, component) {
+  const data = state.cadFiles[role]?.data;
+  if (!data || !component) return null;
+  const exact = data.componentById.get(String(component.id));
+  if (exact) return exact;
+  const sameName = data.components.filter((candidate) => String(candidate.name).trim().toLowerCase() === String(component.name).trim().toLowerCase());
+  return sameName.find((candidate) => String(candidate.packageName).trim().toLowerCase() === String(component.packageName).trim().toLowerCase()) || sameName[0] || null;
+}
+function reportComponents(scope = els.componentReportScope.value) {
+  if (!state.xmlData) return [];
+  if (scope === 'raw' && state.mappingData?.componentSummaries?.length) {
+    const ids = [...new Set(state.mappingData.componentSummaries.filter((item) => item.componentId != null).map((item) => String(item.componentId)))];
+    return ids.map((id) => state.xmlData.componentById.get(id)).filter(Boolean);
+  }
+  const component = currentComponent() || state.xmlData.components.find((item) => item.lands.length) || null;
+  return component ? [component] : [];
+}
+function componentReportRows(component, nameSource) {
+  const mappings = new Map();
+  for (const mapping of state.mappingData?.mappings || []) {
+    if (String(mapping.componentId) === String(component.id) && mapping.globalId != null) mappings.set(Number(mapping.globalId), mapping);
+  }
+  const originalComponent = counterpartComponent('original', component);
+  const generatedComponent = counterpartComponent('generated', component);
+  const originalById = new Map((originalComponent?.lands || []).map((land) => [Number(land.globalId), land]));
+  const generatedById = new Map((generatedComponent?.lands || []).map((land) => [Number(land.globalId), land]));
+  const rows = component.lands.map((land) => {
+    const mapping = mappings.get(Number(land.globalId));
+    const originalLand = originalById.get(Number(land.globalId)) || originalComponent?.lands?.[Number(land.localIndex) - 1] || null;
+    const generatedLand = generatedById.get(Number(land.globalId)) || generatedComponent?.lands?.[Number(land.localIndex) - 1] || null;
+    const originalCadName = originalLand?.cadName || '';
+    const generatedCadName = generatedLand?.cadName || '';
+    const activeRename = state.cadInspector.renames.get(cadLandKey(component.id, land.globalId));
+    const cadName = nameSource === 'original' ? (originalCadName || land.cadName || '')
+      : nameSource === 'generated' ? (generatedCadName || land.cadName || '')
+        : (activeRename || land.cadName || '');
+    const measurementNumber = Number(mapping?.measurement);
+    return {
+      componentName: component.name || `ID ${component.id}`,
+      packageName: component.packageName || '', localIndex: land.localIndex, xrayLand: mapping?.localIndex ?? null,
+      globalId: land.globalId, cadName, originalCadName, generatedCadName,
+      centerX: land.centerX, centerY: land.centerY, width: land.width, length: land.length,
+      measurement: mapping?.measurement == null || mapping?.measurement === '' || !Number.isFinite(measurementNumber) ? null : measurementNumber,
+      confirmed: isVerifiedMapping(mapping), mappingStatus: mapping ? (isVerifiedMapping(mapping) ? 'Confirmed' : (mapping.mapped ? 'Unverified' : 'Unmapped')) : 'CAD only',
+      duplicateCount: 1, zone: '',
+    };
+  });
+  const counts = new Map();
+  for (const item of rows) { const key = String(item.cadName || '').trim(); if (key) counts.set(key, (counts.get(key) || 0) + 1); }
+  for (const item of rows) item.duplicateCount = counts.get(String(item.cadName || '').trim()) || 1;
+  return rows;
+}
+
+function updateComponentReportPreview() {
+  const components = reportComponents();
+  const zones = Math.max(2, Math.min(4, Number(els.componentReportZones.value) || 3));
+  const landCount = components.reduce((sum, component) => sum + component.lands.length, 0);
+  const ids = new Set(components.map((component) => String(component.id)));
+  const measurements = (state.mappingData?.mappings || []).filter((mapping) => ids.has(String(mapping.componentId)) && Number.isFinite(Number(mapping.measurement))).length;
+  els.componentReportPartCount.textContent = formatInt.format(components.length);
+  els.componentReportLandCount.textContent = formatInt.format(landCount);
+  els.componentReportZoneCount.textContent = formatInt.format(components.length * zones * zones);
+  els.componentReportMeasurementCount.textContent = formatInt.format(measurements);
+  const rawAvailable = Boolean(state.mappingData?.componentSummaries?.some((item) => item.componentId != null));
+  [...els.componentReportScope.options].find((option) => option.value === 'raw').disabled = !rawAvailable;
+  if (!rawAvailable && els.componentReportScope.value === 'raw') els.componentReportScope.value = 'current';
+  const originalOption = [...els.componentReportNameSource.options].find((option) => option.value === 'original');
+  const generatedOption = [...els.componentReportNameSource.options].find((option) => option.value === 'generated');
+  originalOption.disabled = !state.cadFiles.original;
+  generatedOption.disabled = !state.cadFiles.generated;
+  if (els.componentReportNameSource.selectedOptions[0]?.disabled) els.componentReportNameSource.value = 'active';
+  els.generateComponentReportButton.disabled = !components.length;
+  els.componentReportMessage.textContent = components.length
+    ? `จะสร้าง ${formatInt.format(components.length)} Component · ${formatInt.format(landCount)} Land · ${formatInt.format(components.length * zones * zones)} ภาพขยาย` 
+    : 'ไม่พบ Component สำหรับสร้างรายงาน';
+}
+function openComponentReport() {
+  if (!state.xmlData) return toast('กรุณานำเข้า CAD ก่อน');
+  els.componentReportOverlay.classList.remove('hidden');
+  updateComponentReportPreview();
+}
+function closeComponentReport() {
+  els.componentReportOverlay.classList.add('hidden');
+}
+function reportFileStem(value) {
+  return String(value || 'component').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9ก-๙_-]+/g, '_').replace(/^_+|_+$/g, '') || 'component';
+}
+async function generateComponentReport() {
+  const components = reportComponents();
+  if (!components.length) return toast('ไม่พบ Component สำหรับสร้างรายงาน');
+  const grid = Math.max(2, Math.min(4, Number(els.componentReportZones.value) || 3));
+  const labels = els.componentReportLabels.value;
+  const nameSource = els.componentReportNameSource.value;
+  const width = Math.max(1400, Math.min(3200, Number(els.componentReportResolution.value) || 2200));
+  const height = Math.round(width * 0.66);
+  const heatmap = els.componentReportHeatmap.checked;
+  const dialog = els.componentReportOverlay.querySelector('.component-report-dialog');
+  const oldText = els.generateComponentReportButton.textContent;
+  dialog?.classList.add('is-building'); els.generateComponentReportButton.disabled = true; els.generateComponentReportButton.textContent = 'กำลังสร้าง…';
+  try {
+    const reportComponentsData = [];
+    for (let componentIndex = 0; componentIndex < components.length; componentIndex += 1) {
+      const component = components[componentIndex];
+      els.componentReportMessage.textContent = `กำลังเตรียม ${component.name} (${componentIndex + 1}/${components.length})…`; await nextFrame();
+      const rows = componentReportRows(component, nameSource);
+      const layout = buildZones(component, rows, grid);
+      const overviewCanvas = renderOverviewImage({ component, rows, bounds: layout.bounds, zones: layout.zones, width, height, heatmap });
+      const overviewPng = await canvasToPngBytes(overviewCanvas);
+      const zones = [];
+      for (let zoneIndex = 0; zoneIndex < layout.zones.length; zoneIndex += 1) {
+        const zone = layout.zones[zoneIndex];
+        els.componentReportMessage.textContent = `กำลังวาด ${component.name} · Zone ${zone.label} (${zoneIndex + 1}/${layout.zones.length})…`; await nextFrame();
+        const zoneCanvas = renderZoneImage({ component, zone, width, height, labels, heatmap });
+        zones.push({ ...zone, imagePng: await canvasToPngBytes(zoneCanvas) });
+      }
+      const values = rows.map((item) => Number(item.measurement)).filter(Number.isFinite);
+      const histogram = histogramModel(values, 50);
+      const histogramCanvas = renderHistogramImage(component.name, histogram, Math.min(width, 1800), Math.round(Math.min(width, 1800) * 0.48));
+      const imagePng = histogramCanvas ? await canvasToPngBytes(histogramCanvas) : null;
+      reportComponentsData.push({
+        id: component.id, name: component.name || `ID ${component.id}`, packageName: component.packageName || '', bounds: layout.bounds, rows, zones,
+        overviewPng, measurementCount: values.length, histogram: { ...histogram, imagePng },
+      });
+    }
+    els.componentReportMessage.textContent = 'กำลังประกอบไฟล์ Excel และฝังรูปภาพ…'; await nextFrame();
+    const nameSourceLabel = ({ active: `${cadRoleLabel(state.activeCadRole)} / ชื่อที่กำลังแสดง`, original: 'Original CAD', generated: 'Generated CAD' })[nameSource] || 'Active CAD';
+    const blob = await buildComponentReportXlsx({
+      title: `${state.xmlData.board?.Name || 'Board'} · Component CAD Report`, boardName: state.xmlData.board?.Name || '', cadFileName: state.fileNames.xml || activeCadFile()?.name || '', xlsxFileName: state.fileNames.xlsx || '',
+      generatedAt: new Date().toISOString(), zoneGrid: grid, nameSourceLabel, components: reportComponentsData,
+    });
+    const scopeName = components.length === 1 ? components[0].name : 'raw_parts';
+    downloadBlob(blob, `${reportFileStem(state.xmlData.board?.Name)}_${reportFileStem(scopeName)}_component_report_v0.9.0.xlsx`);
+    els.componentReportMessage.textContent = `สร้าง Excel สำเร็จ · ${formatInt.format(components.length)} Component · ${formatInt.format(reportComponentsData.reduce((sum, item) => sum + item.rows.length, 0))} Land`;
+    toast('สร้าง Component Report Excel สำเร็จ', 4200);
+  } catch (error) {
+    console.error(error); els.componentReportMessage.textContent = `สร้าง Excel ไม่สำเร็จ: ${error.message}`; toast(`สร้าง Excel ไม่สำเร็จ: ${error.message}`, 5200);
+  } finally {
+    dialog?.classList.remove('is-building'); els.generateComponentReportButton.disabled = false; els.generateComponentReportButton.textContent = oldText; updateComponentReportPreview();
+  }
+}
+
 function exportCsv() {
   const mappings = state.mappingData?.mappings || [];
   const headers = ['xray_local_land','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','verified','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row'];
   const lines = [headers.join(',')];
   for (const m of mappings) lines.push([m.localIndex, m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.confidence, isVerifiedMapping(m), m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
-  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.8.0.csv`);
+  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.9.0.csv`);
 }
 function exportJson() {
   const overrides = (state.mappingData?.mappings || [])
@@ -1575,8 +1722,8 @@ function exportJson() {
     const [componentId, globalId] = key.split('\u0000');
     return { componentId, globalId: Number(globalId), cadName };
   });
-  const payload = { app: 'BGA Land Mapper', version: '0.8.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries, safeMapping: true, cadNameRules: { maxLength: state.cadInspector.maxLength, prefix: state.cadInspector.prefix }, cadNameOverrides, overrides };
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.8.0.json');
+  const payload = { app: 'BGA Land Mapper', version: '0.9.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries, safeMapping: true, cadNameRules: { maxLength: state.cadInspector.maxLength, prefix: state.cadInspector.prefix }, cadNameOverrides, overrides };
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.9.0.json');
 }
 function trustedBackupItem(item) {
   const method = String(item?.mappingMethod || '');
@@ -1744,7 +1891,13 @@ els.clearDuplicateButton.addEventListener('click', () => setSelectedDuplicateNam
 els.fitButton.addEventListener('click', fitView); els.zoomInButton.addEventListener('click', () => zoomAt(1.3)); els.zoomOutButton.addEventListener('click', () => zoomAt(1 / 1.3));
 els.searchButton.addEventListener('click', search); els.searchInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') search(); });
 els.tableFilter.addEventListener('change', () => { state.filter = els.tableFilter.value; state.page = 1; renderTable(); }); els.prevPage.addEventListener('click', () => { state.page -= 1; renderTable(); }); els.nextPage.addEventListener('click', () => { state.page += 1; renderTable(); });
-els.exportCsvButton.addEventListener('click', exportCsv); els.exportJsonButton.addEventListener('click', exportJson);
+els.exportCsvButton.addEventListener('click', exportCsv); els.exportExcelButton.addEventListener('click', openComponentReport); els.exportJsonButton.addEventListener('click', exportJson);
+
+els.closeComponentReportButton.addEventListener('click', closeComponentReport);
+els.cancelComponentReportButton.addEventListener('click', closeComponentReport);
+els.componentReportOverlay.addEventListener('click', (event) => { if (event.target === els.componentReportOverlay) closeComponentReport(); });
+for (const control of [els.componentReportScope, els.componentReportZones, els.componentReportLabels, els.componentReportNameSource, els.componentReportResolution, els.componentReportHeatmap]) control.addEventListener('change', updateComponentReportPreview);
+els.generateComponentReportButton.addEventListener('click', generateComponentReport);
 els.manualButton.addEventListener('click', () => setEditMode(!state.edit.enabled));
 els.exitEditButton.addEventListener('click', () => setEditMode(false));
 els.editPrevButton.addEventListener('click', () => advanceSelected(-1));
@@ -1763,7 +1916,7 @@ els.canvas.addEventListener('pointerdown', (event) => { els.canvas.setPointerCap
 els.canvas.addEventListener('pointermove', (event) => { const point = getCanvasPoint(event); if (state.dragging && state.lastPointer) { state.view.offsetX += point.x - state.lastPointer.x; state.view.offsetY += point.y - state.lastPointer.y; state.lastPointer = point; draw(); els.tooltip.classList.add('hidden'); return; } state.hoveredLand = findNearestLand(point.x, point.y); showTooltip(event, state.hoveredLand); });
 els.canvas.addEventListener('pointerup', (event) => { const point = getCanvasPoint(event); const moved = state.dragStart ? Math.hypot(point.x - state.dragStart.x, point.y - state.dragStart.y) : 0; state.dragging = false; state.lastPointer = null; state.dragStart = null; if (moved < 4) selectLand(findNearestLand(point.x, point.y)); });
 els.canvas.addEventListener('pointercancel', () => { state.dragging = false; state.lastPointer = null; state.dragStart = null; }); els.canvas.addEventListener('pointerleave', () => els.tooltip.classList.add('hidden'));
-window.addEventListener('keydown', (event) => { const tag = document.activeElement?.tagName; if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) return; if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); } if (state.edit.enabled && event.key === 'ArrowLeft') { event.preventDefault(); advanceSelected(-1); } if (state.edit.enabled && event.key === 'ArrowRight') { event.preventDefault(); advanceSelected(1); } if (event.key === 'Escape') { setEditMode(false); closeTeachPanel(); closeDetailedHistogram(); closeCadInspector(); } });
+window.addEventListener('keydown', (event) => { const tag = document.activeElement?.tagName; if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) return; if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); } if (state.edit.enabled && event.key === 'ArrowLeft') { event.preventDefault(); advanceSelected(-1); } if (state.edit.enabled && event.key === 'ArrowRight') { event.preventDefault(); advanceSelected(1); } if (event.key === 'Escape') { setEditMode(false); closeTeachPanel(); closeDetailedHistogram(); closeCadInspector(); closeComponentReport(); } });
 window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); state.installPrompt = event; els.installButton.classList.remove('hidden'); });
 els.installButton.addEventListener('click', async () => { if (!state.installPrompt) return; state.installPrompt.prompt(); await state.installPrompt.userChoice; state.installPrompt = null; els.installButton.classList.add('hidden'); });
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.warn));

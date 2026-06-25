@@ -1,5 +1,5 @@
-const CACHE = 'bga-land-mapper-v0.8.0';
-const ASSETS = ['./','./index.html','./styles.css','./app.js','./parsers.js','./manual-pattern.js','./cad-inspector.js','./cad-compare.js','./zip-reader.js','./manifest.webmanifest','./icons/icon.svg','./icons/icon-192.png','./icons/icon-512.png'];
+const CACHE = 'bga-land-mapper-v0.9.0';
+const ASSETS = ['./','./index.html','./styles.css','./app.js','./parsers.js','./manual-pattern.js','./cad-inspector.js','./cad-compare.js','./component-report.js','./xlsx-report.js','./zip-reader.js','./manifest.webmanifest','./icons/icon.svg','./icons/icon-192.png','./icons/icon-512.png'];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (event) => {

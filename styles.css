@@ -344,3 +344,18 @@ tbody tr.unverified-row { box-shadow: inset 2px 0 0 rgba(255,189,91,.38); }
 #cadCompareOverlayToggle:disabled+span{opacity:.48}
 @media(max-width:900px){.cad-compare-toolbar{grid-template-columns:1fr 1fr}.cad-compare-toolbar .cad-inspector-search{grid-column:1/-1}.cad-compare-summary{grid-template-columns:repeat(2,1fr)}}
 .dot.compare-original{background:transparent;border:2px solid #56d6c5}.dot.compare-generated{background:transparent;border:2px solid #ff75dc}
+
+/* v0.9.0 Component Excel report */
+#exportExcelButton:not(:disabled){border-color:rgba(102,227,159,.48);background:rgba(31,150,91,.16);color:#dfffee}
+.component-report-overlay{z-index:46}.component-report-dialog{width:min(920px,96vw);max-height:92vh;overflow:auto;border-radius:18px}
+.component-report-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:18px 20px;border-bottom:1px solid var(--line-soft)}
+.component-report-options label{min-width:0;font-size:11px}.component-report-options select{min-height:40px}
+.component-report-toggle{align-self:end;min-height:40px;padding:9px 11px;border:1px solid var(--line-soft);border-radius:10px;background:rgba(255,255,255,.018)}
+.component-report-preview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;padding:16px 20px}
+.component-report-preview>div{padding:12px;border:1px solid var(--line-soft);border-radius:11px;background:rgba(255,255,255,.018);text-align:center}
+.component-report-preview span{display:block;color:var(--muted);font-size:9px}.component-report-preview strong{display:block;margin-top:5px;font-size:20px}
+#componentReportMessage{margin:0;padding:4px 20px 15px;min-height:36px}
+.component-report-actions{display:flex;justify-content:flex-end;gap:9px;padding:14px 20px 19px;border-top:1px solid var(--line-soft)}
+.component-report-actions button{min-height:42px}
+.component-report-dialog.is-building .component-report-options,.component-report-dialog.is-building .component-report-preview{opacity:.58;pointer-events:none}
+@media(max-width:680px){.component-report-dialog{width:100vw;min-height:100vh;max-height:100vh;border-radius:0}.component-report-options{grid-template-columns:1fr}.component-report-preview{grid-template-columns:repeat(2,minmax(0,1fr))}.component-report-actions{position:sticky;bottom:0;background:#0c1421}}
