@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
-  <title>BGA Land Mapper v0.6.0</title>
+  <title>BGA Land Mapper v0.7.0</title>
 </head>
 <body>
   <header class="topbar">
@@ -104,6 +104,7 @@
           <button id="searchButton" type="button">ค้นหา</button>
         </div>
         <div class="toolbar-actions">
+          <button id="cadInspectorButton" type="button" disabled>ตรวจชื่อ CAD</button>
           <button id="manualButton" type="button" disabled>โหมด Edit</button>
           <button id="teachButton" type="button" disabled>Manual Teach</button>
           <button id="undoButton" type="button" disabled>Undo</button>
@@ -330,6 +331,83 @@
           <p class="helper-text">Safe Pattern ไม่ขยายออกนอก Anchor และผลที่ Apply ยังไม่ถือว่า Confirmed จนกว่าจะคลิกยืนยันใน Edit Mode</p>
         </section>
       </div>
+    </div>
+  </div>
+
+  <div id="cadInspectorOverlay" class="modal-overlay cad-inspector-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cadInspectorTitle">
+    <div class="cad-inspector-dialog panel">
+      <header class="cad-inspector-header">
+        <div>
+          <span class="eyebrow">CAD NAME INSPECTOR</span>
+          <h2 id="cadInspectorTitle">ตรวจและแก้ชื่อ Land ใน CAD</h2>
+          <p>ตรวจชื่อซ้ำภายใน Part เดียวกันและชื่อที่ยาวเกินข้อจำกัดของเครื่อง ก่อนส่งออก XML ฉบับแก้ไข</p>
+        </div>
+        <button id="closeCadInspectorButton" class="icon-button" type="button" aria-label="ปิด">✕</button>
+      </header>
+
+      <div class="cad-inspector-toolbar">
+        <label>ขอบเขต
+          <select id="cadInspectorScope">
+            <option value="all">ทั้ง CAD</option>
+            <option value="raw">เฉพาะ Part ในข้อมูลดิบ</option>
+            <option value="current">เฉพาะ Part ที่กำลังดู</option>
+          </select>
+        </label>
+        <label>ความยาวสูงสุด
+          <input id="cadMaxLength" type="number" min="2" max="12" step="1" value="5" />
+        </label>
+        <label>Prefix ชื่ออัตโนมัติ
+          <input id="cadNamePrefix" type="text" maxlength="4" value="L" placeholder="L" />
+        </label>
+        <label>ตัวกรอง
+          <select id="cadIssueFilter">
+            <option value="issues">เฉพาะที่มีปัญหา</option>
+            <option value="all">ทั้งหมด</option>
+            <option value="duplicate">ชื่อซ้ำ</option>
+            <option value="too-long">เกินความยาว</option>
+            <option value="blank">ชื่อว่าง</option>
+            <option value="changed">แก้แล้ว</option>
+            <option value="valid">ผ่านแล้ว</option>
+          </select>
+        </label>
+        <label class="cad-inspector-search">ค้นหา
+          <input id="cadInspectorSearch" type="search" placeholder="Part, XML ID หรือชื่อ Land" />
+        </label>
+      </div>
+
+      <div class="cad-inspector-summary">
+        <div><span>Land ทั้งหมด</span><strong id="cadAuditTotal">0</strong></div>
+        <div><span>ผ่านแล้ว</span><strong id="cadAuditValid">0</strong></div>
+        <div><span>ยังมีปัญหา</span><strong id="cadAuditUnresolved">0</strong></div>
+        <div><span>กลุ่มชื่อซ้ำ</span><strong id="cadAuditDuplicateGroups">0</strong></div>
+        <div><span>จุดชื่อซ้ำ</span><strong id="cadAuditDuplicateLands">0</strong></div>
+        <div><span>เกินความยาว</span><strong id="cadAuditTooLong">0</strong></div>
+        <div><span>ชื่อว่าง</span><strong id="cadAuditBlank">0</strong></div>
+        <div><span>ชื่อที่เปลี่ยน</span><strong id="cadAuditChanged">0</strong></div>
+      </div>
+
+      <div class="cad-inspector-actions">
+        <button id="cadAutoFixButton" class="primary" type="button">แก้เฉพาะชื่อที่มีปัญหา</button>
+        <button id="cadRenameAllButton" type="button">สร้างชื่อใหม่ทั้งขอบเขต</button>
+        <button id="cadResetNamesButton" type="button">คืนชื่อเดิม</button>
+        <button id="cadExportReportButton" type="button">Export รายงาน CSV</button>
+        <button id="cadApplyNamesButton" type="button">ใช้ชื่อใหม่ในโปรเจกต์</button>
+        <button id="cadExportXmlButton" class="primary" type="button">Export CAD XML</button>
+      </div>
+      <p id="cadInspectorMessage" class="helper-text">ชื่ออัตโนมัติใช้ A–Z และ 0–9 ความยาวไม่เกินค่าที่กำหนด และรับประกันว่าไม่ซ้ำภายใน Part</p>
+
+      <div class="cad-inspector-table-wrap">
+        <table class="cad-inspector-table">
+          <thead>
+            <tr><th>Part</th><th>Local</th><th>XML ID</th><th>ชื่อเดิม</th><th>ชื่อสุดท้าย</th><th>Length</th><th>สถานะ</th><th></th></tr>
+          </thead>
+          <tbody id="cadInspectorTableBody"></tbody>
+        </table>
+      </div>
+      <footer class="cad-inspector-footer">
+        <span id="cadInspectorTableSummary">0 รายการ</span>
+        <div><button id="cadInspectorPrevPage" type="button">‹</button><span id="cadInspectorPageLabel">1 / 1</span><button id="cadInspectorNextPage" type="button">›</button></div>
+      </footer>
     </div>
   </div>
 

@@ -15,6 +15,14 @@ import {
   stateForLand,
   stateForUnmapped,
 } from './manual-pattern.js';
+import {
+  buildCadNameAudit,
+  cadAuditToCsv,
+  cadLandKey,
+  generateCadRenames,
+  normalizeCadName,
+  rewriteCadXml,
+} from './cad-inspector.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -28,7 +36,7 @@ const els = {
   mappingFormula: $('mappingFormula'), componentSelect: $('componentSelect'), heatmapToggle: $('heatmapToggle'), labelToggle: $('labelToggle'),
   duplicateToggle: $('duplicateToggle'), duplicateOnlyToggle: $('duplicateOnlyToggle'), duplicateNameSelect: $('duplicateNameSelect'), duplicateSummaryMini: $('duplicateSummaryMini'),
   fitButton: $('fitButton'), zoomInButton: $('zoomInButton'), zoomOutButton: $('zoomOutButton'),
-  searchInput: $('searchInput'), searchButton: $('searchButton'), manualButton: $('manualButton'), teachButton: $('teachButton'),
+  searchInput: $('searchInput'), searchButton: $('searchButton'), cadInspectorButton: $('cadInspectorButton'), manualButton: $('manualButton'), teachButton: $('teachButton'),
   undoButton: $('undoButton'), redoButton: $('redoButton'), exportCsvButton: $('exportCsvButton'), exportJsonButton: $('exportJsonButton'),
   canvas: $('cadCanvas'), viewerTitle: $('viewerTitle'), viewerSubtitle: $('viewerSubtitle'), tooltip: $('tooltip'), manualBanner: $('manualBanner'),
   editCurrentLabel: $('editCurrentLabel'), exitEditButton: $('exitEditButton'), editPrevButton: $('editPrevButton'), editNextButton: $('editNextButton'), editAutoNext: $('editAutoNext'), editLockConfirmed: $('editLockConfirmed'),
@@ -48,6 +56,10 @@ const els = {
   anchorButton: $('anchorButton'), unmapButton: $('unmapButton'), nudgePrevButton: $('nudgePrevButton'), nudgeNextButton: $('nudgeNextButton'),
   aliasInput: $('aliasInput'), saveAliasButton: $('saveAliasButton'), duplicateWarning: $('duplicateWarning'), rawData: $('rawData'), copyRawButton: $('copyRawButton'),
   duplicatePanel: $('duplicatePanel'), duplicateGroupCount: $('duplicateGroupCount'), duplicatePanelMessage: $('duplicatePanelMessage'), duplicatePositionList: $('duplicatePositionList'), fitDuplicateButton: $('fitDuplicateButton'), clearDuplicateButton: $('clearDuplicateButton'),
+  cadInspectorOverlay: $('cadInspectorOverlay'), closeCadInspectorButton: $('closeCadInspectorButton'), cadInspectorScope: $('cadInspectorScope'), cadMaxLength: $('cadMaxLength'), cadNamePrefix: $('cadNamePrefix'), cadIssueFilter: $('cadIssueFilter'), cadInspectorSearch: $('cadInspectorSearch'),
+  cadAuditTotal: $('cadAuditTotal'), cadAuditValid: $('cadAuditValid'), cadAuditUnresolved: $('cadAuditUnresolved'), cadAuditDuplicateGroups: $('cadAuditDuplicateGroups'), cadAuditDuplicateLands: $('cadAuditDuplicateLands'), cadAuditTooLong: $('cadAuditTooLong'), cadAuditBlank: $('cadAuditBlank'), cadAuditChanged: $('cadAuditChanged'),
+  cadAutoFixButton: $('cadAutoFixButton'), cadRenameAllButton: $('cadRenameAllButton'), cadResetNamesButton: $('cadResetNamesButton'), cadExportReportButton: $('cadExportReportButton'), cadApplyNamesButton: $('cadApplyNamesButton'), cadExportXmlButton: $('cadExportXmlButton'), cadInspectorMessage: $('cadInspectorMessage'),
+  cadInspectorTableBody: $('cadInspectorTableBody'), cadInspectorTableSummary: $('cadInspectorTableSummary'), cadInspectorPrevPage: $('cadInspectorPrevPage'), cadInspectorNextPage: $('cadInspectorNextPage'), cadInspectorPageLabel: $('cadInspectorPageLabel'),
   teachOverlay: $('teachOverlay'), closeTeachButton: $('closeTeachButton'), teachComponentLabel: $('teachComponentLabel'),
   anchorCountLabel: $('anchorCountLabel'), anchorList: $('anchorList'), clearAnchorsButton: $('clearAnchorsButton'),
   patternDirection: $('patternDirection'), patternShift: $('patternShift'), patternStart: $('patternStart'), patternEnd: $('patternEnd'), preserveAnchors: $('preserveAnchors'),
@@ -67,6 +79,7 @@ const state = {
   fileNames: { xml: '', xlsx: '' }, installPrompt: null,
   histogram: { rangeMin: null, rangeMax: null, selectedBin: null, hoveredBin: null, layout: null, drag: null, filterEnabled: false },
   duplicateView: { enabled: true, dimOthers: false, selectedName: '' },
+  cadInspector: { renames: new Map(), maxLength: 5, prefix: 'L', scope: 'all', filter: 'issues', search: '', page: 1, pageSize: 120, audit: null },
 };
 
 const ctx = els.canvas.getContext('2d', { alpha: false });
@@ -136,6 +149,215 @@ function escapeCsv(value) {
   const text = value == null ? '' : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
+
+function cadInspectorComponentIds(scope = state.cadInspector.scope) {
+  if (scope === 'all') return null;
+  if (scope === 'current') return state.selectedComponentId == null ? new Set() : new Set([String(state.selectedComponentId)]);
+  const ids = (state.mappingData?.componentSummaries || [])
+    .filter((summary) => summary.componentId != null)
+    .map((summary) => String(summary.componentId));
+  return new Set(ids);
+}
+function buildCurrentCadAudit(scope = state.cadInspector.scope) {
+  return buildCadNameAudit(state.xmlData, state.cadInspector.renames, {
+    maxLength: state.cadInspector.maxLength,
+    componentIds: cadInspectorComponentIds(scope),
+  });
+}
+function cadIssueLabel(issue) {
+  return ({ duplicate: 'ชื่อซ้ำ', 'too-long': 'เกินความยาว', blank: 'ชื่อว่าง' })[issue] || issue;
+}
+function cadInspectorFilteredItems(audit) {
+  const filter = state.cadInspector.filter;
+  const search = state.cadInspector.search.trim().toLowerCase();
+  return audit.items.filter((item) => {
+    if (filter === 'issues' && item.valid) return false;
+    if (filter === 'duplicate' && !item.issues.includes('duplicate')) return false;
+    if (filter === 'too-long' && !item.issues.includes('too-long')) return false;
+    if (filter === 'blank' && !item.issues.includes('blank')) return false;
+    if (filter === 'changed' && !item.changed) return false;
+    if (filter === 'valid' && !item.valid) return false;
+    if (!search) return true;
+    return [item.componentName, item.packageName, item.globalId, item.localIndex, item.originalName, item.proposedName]
+      .some((value) => String(value ?? '').toLowerCase().includes(search));
+  });
+}
+function renderCadInspectorTable() {
+  const audit = state.cadInspector.audit || buildCurrentCadAudit();
+  const items = cadInspectorFilteredItems(audit);
+  const pages = Math.max(1, Math.ceil(items.length / state.cadInspector.pageSize));
+  state.cadInspector.page = Math.max(1, Math.min(pages, state.cadInspector.page));
+  const start = (state.cadInspector.page - 1) * state.cadInspector.pageSize;
+  const shown = items.slice(start, start + state.cadInspector.pageSize);
+  els.cadInspectorTableBody.innerHTML = '';
+
+  for (const item of shown) {
+    const row = document.createElement('tr');
+    row.className = item.valid ? 'cad-valid-row' : 'cad-invalid-row';
+    const componentCell = document.createElement('td');
+    const componentName = document.createElement('strong'); componentName.textContent = item.componentName;
+    const componentMeta = document.createElement('small'); componentMeta.textContent = item.packageName || '—';
+    componentCell.append(componentName, document.createElement('br'), componentMeta);
+    const localCell = document.createElement('td'); localCell.textContent = item.localIndex ?? '—';
+    const idCell = document.createElement('td'); idCell.textContent = item.globalId ?? '—';
+    const originalCell = document.createElement('td'); originalCell.className = 'cad-name-original'; originalCell.textContent = item.originalName || '(ว่าง)';
+    const finalCell = document.createElement('td');
+    const input = document.createElement('input'); input.className = `cad-name-input${item.valid ? '' : ' invalid'}`; input.value = item.proposedName; input.dataset.key = item.key; input.autocomplete = 'off'; input.spellcheck = false;
+    input.addEventListener('change', () => {
+      const value = normalizeCadName(input.value).toUpperCase();
+      if (value === item.originalName) state.cadInspector.renames.delete(item.key);
+      else state.cadInspector.renames.set(item.key, value);
+      refreshCadInspector();
+    });
+    finalCell.append(input);
+    const lengthCell = document.createElement('td'); lengthCell.textContent = `${item.length}/${state.cadInspector.maxLength}`;
+    const issueCell = document.createElement('td'); const issueList = document.createElement('div'); issueList.className = 'cad-issue-list';
+    if (item.valid) { const chip = document.createElement('span'); chip.className = 'cad-issue-chip ok'; chip.textContent = 'ผ่าน'; issueList.append(chip); }
+    for (const issue of item.issues) { const chip = document.createElement('span'); chip.className = `cad-issue-chip ${issue}`; chip.textContent = cadIssueLabel(issue); issueList.append(chip); }
+    if (item.changed) { const chip = document.createElement('span'); chip.className = 'cad-issue-chip changed'; chip.textContent = 'แก้แล้ว'; issueList.append(chip); }
+    issueCell.append(issueList);
+    const actionCell = document.createElement('td'); const locate = document.createElement('button'); locate.type = 'button'; locate.className = 'cad-row-action'; locate.textContent = 'ดูตำแหน่ง'; locate.addEventListener('click', () => locateCadAuditItem(item)); actionCell.append(locate);
+    row.append(componentCell, localCell, idCell, originalCell, finalCell, lengthCell, issueCell, actionCell);
+    els.cadInspectorTableBody.append(row);
+  }
+
+  if (!shown.length) {
+    const row = document.createElement('tr'); const cell = document.createElement('td'); cell.colSpan = 8; cell.className = 'empty-state'; cell.textContent = 'ไม่พบรายการตามตัวกรอง'; row.append(cell); els.cadInspectorTableBody.append(row);
+  }
+  els.cadInspectorTableSummary.textContent = `${formatInt.format(items.length)} รายการ · แสดง ${items.length ? formatInt.format(start + 1) : 0}–${formatInt.format(Math.min(start + shown.length, items.length))}`;
+  els.cadInspectorPageLabel.textContent = `${state.cadInspector.page} / ${pages}`;
+  els.cadInspectorPrevPage.disabled = state.cadInspector.page <= 1;
+  els.cadInspectorNextPage.disabled = state.cadInspector.page >= pages;
+}
+function refreshCadInspector() {
+  if (!state.xmlData) return;
+  state.cadInspector.maxLength = Math.max(2, Number(els.cadMaxLength.value) || 5);
+  state.cadInspector.prefix = String(els.cadNamePrefix.value || 'L').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, Math.max(1, state.cadInspector.maxLength - 1)) || 'L';
+  els.cadNamePrefix.value = state.cadInspector.prefix;
+  state.cadInspector.scope = els.cadInspectorScope.value;
+  state.cadInspector.filter = els.cadIssueFilter.value;
+  state.cadInspector.search = els.cadInspectorSearch.value;
+  const audit = buildCurrentCadAudit(); state.cadInspector.audit = audit;
+  const summary = audit.summary;
+  els.cadAuditTotal.textContent = formatInt.format(summary.total);
+  els.cadAuditValid.textContent = formatInt.format(summary.valid);
+  els.cadAuditUnresolved.textContent = formatInt.format(summary.unresolved);
+  els.cadAuditDuplicateGroups.textContent = formatInt.format(summary.duplicateGroups);
+  els.cadAuditDuplicateLands.textContent = formatInt.format(summary.duplicateLands);
+  els.cadAuditTooLong.textContent = formatInt.format(summary.tooLong);
+  els.cadAuditBlank.textContent = formatInt.format(summary.blank);
+  els.cadAuditChanged.textContent = formatInt.format(summary.changed);
+  const fullAudit = buildCurrentCadAudit('all');
+  els.cadExportXmlButton.disabled = fullAudit.summary.unresolved > 0;
+  els.cadExportXmlButton.title = fullAudit.summary.unresolved ? `ยังมีชื่อไม่ผ่าน ${fullAudit.summary.unresolved} จุดใน CAD` : 'พร้อมส่งออก XML';
+  els.cadApplyNamesButton.disabled = state.cadInspector.renames.size === 0;
+  els.cadResetNamesButton.disabled = state.cadInspector.renames.size === 0;
+  els.cadInspectorMessage.textContent = fullAudit.summary.unresolved
+    ? `ขอบเขตนี้ยังมีปัญหา ${formatInt.format(summary.unresolved)} จุด · ทั้ง CAD ยังไม่ผ่าน ${formatInt.format(fullAudit.summary.unresolved)} จุด จึงยัง Export XML ไม่ได้`
+    : `CAD ผ่านการตรวจทั้งหมดแล้ว · ชื่อทุกจุดไม่ซ้ำภายใน Part และยาวไม่เกิน ${state.cadInspector.maxLength} ตัวอักษร`;
+  renderCadInspectorTable();
+}
+function openCadInspector() {
+  if (!state.xmlData) return toast('กรุณานำเข้า CAD XML ก่อน');
+  els.cadInspectorScope.value = state.cadInspector.scope;
+  els.cadMaxLength.value = state.cadInspector.maxLength;
+  els.cadNamePrefix.value = state.cadInspector.prefix;
+  els.cadIssueFilter.value = state.cadInspector.filter;
+  els.cadInspectorSearch.value = state.cadInspector.search;
+  state.cadInspector.page = 1;
+  els.cadInspectorOverlay.classList.remove('hidden');
+  refreshCadInspector();
+}
+function closeCadInspector() { els.cadInspectorOverlay.classList.add('hidden'); }
+function generateCadNames(renameAll = false) {
+  if (!state.xmlData) return;
+  if (renameAll && !window.confirm('สร้างชื่อใหม่ให้ Land ทุกจุดในขอบเขตนี้ใช่หรือไม่? ชื่อเดิมจะยังอยู่ใน XML ต้นฉบับจนกว่าจะ Export')) return;
+  try {
+    const result = generateCadRenames(state.xmlData, state.cadInspector.renames, {
+      maxLength: state.cadInspector.maxLength,
+      prefix: state.cadInspector.prefix,
+      renameAll,
+      componentIds: cadInspectorComponentIds(),
+    });
+    state.cadInspector.renames = result.renames;
+    state.cadInspector.page = 1;
+    refreshCadInspector();
+    toast(`สร้างชื่อที่ไม่ซ้ำแล้ว ${formatInt.format(result.generated)} จุด`);
+  } catch (error) { toast(error.message, 5200); }
+}
+function applyCadNamesToProject({ silent = false } = {}) {
+  if (!state.xmlData) return;
+  const changedComponents = new Set();
+  for (const component of state.xmlData.components) {
+    for (const land of component.lands || []) {
+      const key = cadLandKey(component.id, land.globalId);
+      const original = land.originalCadName ?? land.cadName;
+      if (state.cadInspector.renames.has(key)) {
+        if (land.originalCadName == null) land.originalCadName = original;
+        land.cadName = normalizeCadName(state.cadInspector.renames.get(key));
+        changedComponents.add(component);
+      } else if (land.originalCadName != null) {
+        land.cadName = land.originalCadName;
+        delete land.originalCadName;
+        changedComponents.add(component);
+      }
+    }
+  }
+  for (const component of changedComponents) duplicateGroupCache.delete(component);
+  if (state.mappingData) {
+    for (const mapping of state.mappingData.mappings) {
+      if (mapping.globalId == null || mapping.componentId == null) continue;
+      const component = state.xmlData.componentById.get(String(mapping.componentId));
+      const land = component?.lands.find((candidate) => Number(candidate.globalId) === Number(mapping.globalId));
+      if (land) mapping.cadName = land.cadName;
+    }
+    for (const mapping of state.mappingData.mappings) {
+      if (mapping.globalId == null || mapping.componentId == null) continue;
+      const component = state.xmlData.componentById.get(String(mapping.componentId));
+      const land = component?.lands.find((candidate) => Number(candidate.globalId) === Number(mapping.globalId));
+      if (land) mapping.duplicateCadNameCount = duplicateCountForLand(land);
+    }
+  }
+  refreshDuplicateControls(); renderTable(); draw(); updateStats();
+  if (state.selected) selectMapping(state.selected, false);
+  if (!silent) toast(`นำชื่อใหม่ไปใช้ในโปรเจกต์แล้ว ${formatInt.format(state.cadInspector.renames.size)} จุด`);
+}
+function resetCadNames() {
+  if (!state.cadInspector.renames.size) return;
+  if (!window.confirm('คืนชื่อ CAD ที่แก้ทั้งหมดกลับเป็นชื่อจากไฟล์ต้นฉบับใช่หรือไม่?')) return;
+  state.cadInspector.renames.clear();
+  applyCadNamesToProject({ silent: true });
+  state.cadInspector.page = 1; refreshCadInspector(); toast('คืนชื่อเดิมแล้ว');
+}
+function locateCadAuditItem(item) {
+  const component = state.xmlData?.componentById.get(String(item.componentId));
+  const land = component?.lands.find((candidate) => Number(candidate.globalId) === Number(item.globalId));
+  if (!component || !land) return;
+  let option = [...els.componentSelect.options].find((candidate) => candidate.value === String(component.id));
+  if (!option) { option = document.createElement('option'); option.value = String(component.id); option.textContent = `${component.name} · CAD Inspector · ${formatInt.format(component.lands.length)} lands`; els.componentSelect.append(option); }
+  state.selectedComponentId = String(component.id); els.componentSelect.value = String(component.id); state.duplicateView.selectedName = '';
+  closeCadInspector(); refreshDuplicateControls(); fitView(); selectLand(land); toast(`ตำแหน่ง ${component.name} / XML ID ${item.globalId}`);
+}
+function exportCadAuditReport() {
+  const audit = buildCurrentCadAudit();
+  const board = state.xmlData?.board?.Name || 'cad';
+  downloadBlob(new Blob(['\ufeff', cadAuditToCsv(audit)], { type: 'text/csv;charset=utf-8' }), `${board}_cad_name_audit.csv`);
+}
+function exportCorrectedCadXml() {
+  if (!state.xmlData || !state.xmlText) return;
+  const fullAudit = buildCurrentCadAudit('all');
+  if (fullAudit.summary.unresolved) {
+    state.cadInspector.scope = 'all'; state.cadInspector.filter = 'issues'; state.cadInspector.page = 1;
+    els.cadInspectorScope.value = 'all'; els.cadIssueFilter.value = 'issues'; refreshCadInspector();
+    return toast(`ยัง Export ไม่ได้: CAD มีชื่อไม่ผ่าน ${formatInt.format(fullAudit.summary.unresolved)} จุด`, 5200);
+  }
+  const output = rewriteCadXml(state.xmlText, state.cadInspector.renames);
+  const original = state.fileNames.xml || 'cad.xml';
+  const stem = original.replace(/\.xml$/i, '');
+  downloadBlob(new Blob([output], { type: 'application/xml;charset=utf-8' }), `${stem}_cad_checked.xml`);
+  toast(`Export CAD XML สำเร็จ · แก้ชื่อ ${formatInt.format(state.cadInspector.renames.size)} จุด`);
+}
+
 function currentComponent() { return state.xmlData?.componentById.get(String(state.selectedComponentId)) || null; }
 function currentMappings() {
   if (!state.mappingData) return [];
@@ -365,7 +587,8 @@ function updateStats() {
   els.projectStatus.textContent = ready ? `พร้อม · ${formatInt.format(stats.verified || 0)} confirmed · ${formatInt.format(stats.unverified || 0)} unverified` : state.xmlData ? 'เปิด XML แล้ว' : 'ยังไม่ได้เปิดโปรเจกต์';
   els.projectStatus.className = `status-pill ${ready ? 'ready' : 'muted'}`;
   els.remapButton.disabled = !state.xmlData || !state.xlsxData;
-  els.exportCsvButton.disabled = !ready; els.exportJsonButton.disabled = !ready; els.restoreButton.disabled = !ready; els.teachButton.disabled = !ready;
+  els.cadInspectorButton.disabled = !state.xmlData;
+  els.exportCsvButton.disabled = !ready; els.exportJsonButton.disabled = !state.xmlData; els.restoreButton.disabled = !state.xmlData; els.teachButton.disabled = !ready;
   els.manualButton.disabled = !ready; refreshHistoryButtons();
 }
 function runMapping() {
@@ -383,7 +606,7 @@ async function processFile(file) {
   if (!file) return; setLoading(true, `กำลังเปิด ${file.name}…`); await nextFrame();
   try {
     const project = await extractProjectFiles(file);
-    if (project.xmlText) { state.xmlText = project.xmlText; state.fileNames.xml = project.names.xml || file.name; els.importMessage.textContent = 'กำลังอ่าน Component และ Land จาก XML…'; await nextFrame(); state.xmlData = parseInspectionXml(project.xmlText); }
+    if (project.xmlText) { state.xmlText = project.xmlText; state.fileNames.xml = project.names.xml || file.name; state.cadInspector.renames = new Map(); state.cadInspector.audit = null; els.importMessage.textContent = 'กำลังอ่าน Component และ Land จาก XML…'; await nextFrame(); state.xmlData = parseInspectionXml(project.xmlText); }
     if (project.xlsxBuffer) { state.xlsxBuffer = project.xlsxBuffer; state.fileNames.xlsx = project.names.xlsx || file.name; els.importMessage.textContent = 'กำลังอ่านตารางผล X-ray จาก XLSX…'; await nextFrame(); state.xlsxData = await parseXlsx(project.xlsxBuffer); }
     els.xmlFileName.textContent = state.fileNames.xml || '—'; els.xlsxFileName.textContent = state.fileNames.xlsx || '—';
     if (state.xmlData) populateComponents(state.selectedComponentId);
@@ -403,8 +626,8 @@ async function processFile(file) {
   finally { setLoading(false); els.projectFile.value = ''; }
 }
 function resetProject() {
-  Object.assign(state, { xmlText: null, xlsxBuffer: null, xmlData: null, xlsxData: null, schema: null, mappingData: null, selectedComponentId: null, selected: null, hoveredLand: null, manualMode: false, preview: null, edit: { enabled: false, autoNext: true, lockConfirmed: true }, undoStack: [], redoStack: [], page: 1, fileNames: { xml: '', xlsx: '' }, view: { scale: 1, offsetX: 0, offsetY: 0 }, dragStart: null, duplicateView: { enabled: true, dimOthers: false, selectedName: '' } });
-  resetHistogramState(); els.histogramOverlay.classList.add('hidden'); els.duplicateToggle.checked = true; els.duplicateOnlyToggle.checked = false;
+  Object.assign(state, { xmlText: null, xlsxBuffer: null, xmlData: null, xlsxData: null, schema: null, mappingData: null, selectedComponentId: null, selected: null, hoveredLand: null, manualMode: false, preview: null, edit: { enabled: false, autoNext: true, lockConfirmed: true }, undoStack: [], redoStack: [], page: 1, fileNames: { xml: '', xlsx: '' }, view: { scale: 1, offsetX: 0, offsetY: 0 }, dragStart: null, duplicateView: { enabled: true, dimOthers: false, selectedName: '' }, cadInspector: { renames: new Map(), maxLength: 5, prefix: 'L', scope: 'all', filter: 'issues', search: '', page: 1, pageSize: 120, audit: null } });
+  resetHistogramState(); els.histogramOverlay.classList.add('hidden'); els.cadInspectorOverlay.classList.add('hidden'); els.duplicateToggle.checked = true; els.duplicateOnlyToggle.checked = false;
   els.xmlFileName.textContent = '—'; els.xlsxFileName.textContent = '—'; els.importMessage.textContent = 'ไฟล์จะถูกประมวลผลในเครื่อง ไม่อัปโหลดไปยังเซิร์ฟเวอร์';
   for (const select of [els.componentColumn, els.packageColumn, els.landColumn, els.measurementColumn, els.componentSelect]) select.innerHTML = '';
   els.mappingTableBody.innerHTML = ''; els.teachOverlay.classList.add('hidden'); clearDetails(); refreshDuplicateControls(); renderTeachPanel(); updateEditPanel(); updateStats(); draw(); renderHistogram();
@@ -1067,14 +1290,18 @@ function exportCsv() {
   const headers = ['xray_local_land','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','verified','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row'];
   const lines = [headers.join(',')];
   for (const m of mappings) lines.push([m.localIndex, m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.confidence, isVerifiedMapping(m), m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
-  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.6.0.csv`);
+  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.7.0.csv`);
 }
 function exportJson() {
   const overrides = (state.mappingData?.mappings || [])
     .filter((m) => isVerifiedMapping(m) || m.alias || m.mappingMethod === 'manual-unmapped')
     .map((m) => ({ sourceRow: m.sourceRow, localIndex: m.localIndex, componentName: m.componentName, componentId: m.componentId, globalId: m.globalId, cadName: m.cadName, alias: m.alias || '', manual: Boolean(m.manual), verified: isVerifiedMapping(m), mapped: Boolean(m.mapped), anchorLocked: Boolean(m.anchorLocked), confidence: m.confidence, mappingMethod: m.mappingMethod }));
-  const payload = { app: 'BGA Land Mapper', version: '0.6.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries, safeMapping: true, overrides };
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.6.0.json');
+  const cadNameOverrides = [...state.cadInspector.renames.entries()].map(([key, cadName]) => {
+    const [componentId, globalId] = key.split('\u0000');
+    return { componentId, globalId: Number(globalId), cadName };
+  });
+  const payload = { app: 'BGA Land Mapper', version: '0.7.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries, safeMapping: true, cadNameRules: { maxLength: state.cadInspector.maxLength, prefix: state.cadInspector.prefix }, cadNameOverrides, overrides };
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.7.0.json');
 }
 function trustedBackupItem(item) {
   const method = String(item?.mappingMethod || '');
@@ -1083,48 +1310,63 @@ function trustedBackupItem(item) {
   return Boolean(item?.anchorLocked && method === 'manual-anchor');
 }
 async function restoreBackup(file) {
-  if (!file || !state.mappingData || !state.xmlData) return;
+  if (!file || !state.xmlData) return;
   try {
     const payload = JSON.parse(await file.text());
-    if (!Array.isArray(payload.overrides)) throw new Error('ไฟล์ Backup ไม่มี overrides');
-    const bySourceRow = new Map(state.mappingData.mappings.map((m) => [Number(m.sourceRow), m]));
-    const byKey = new Map(state.mappingData.mappings.map((m) => [`${m.componentName}\u0000${m.localIndex}`, m]));
-    const changes = [];
-    let skipped = 0;
-    let ignoredGenerated = 0;
-    let restoredConfirmed = 0;
-    let restoredNotes = 0;
-
-    for (const item of payload.overrides) {
-      const mapping = bySourceRow.get(Number(item.sourceRow)) || byKey.get(`${item.componentName}\u0000${item.localIndex}`);
-      if (!mapping) { skipped += 1; continue; }
-      const method = String(item.mappingMethod || '');
-      let after = snapshotMapping(mapping);
-      let changed = false;
-
-      if (item.alias) { after.alias = String(item.alias); restoredNotes += 1; changed = true; }
-
-      if (item.mapped === false && method === 'manual-unmapped') {
-        after = { ...stateForUnmapped(mapping), alias: item.alias || '' };
-        changed = true;
-      } else if (trustedBackupItem(item) && item.mapped !== false && item.globalId != null) {
-        const component = state.xmlData.componentById.get(String(item.componentId || mapping.componentId));
+    let restoredCadNames = 0;
+    if (payload.cadNameRules?.maxLength) state.cadInspector.maxLength = Math.max(2, Number(payload.cadNameRules.maxLength) || 5);
+    if (payload.cadNameRules?.prefix) state.cadInspector.prefix = String(payload.cadNameRules.prefix);
+    if (Array.isArray(payload.cadNameOverrides)) {
+      for (const item of payload.cadNameOverrides) {
+        if (item.componentId == null || item.globalId == null) continue;
+        const component = state.xmlData.componentById.get(String(item.componentId));
         const land = component?.lands.find((candidate) => Number(candidate.globalId) === Number(item.globalId));
-        if (!land) { skipped += 1; continue; }
-        after = stateForLand(mapping, land, { manual: true, verified: true, anchorLocked: Boolean(item.anchorLocked), confidence: 100, mappingMethod: item.anchorLocked ? 'manual-anchor' : 'manual-direct', duplicateCadNameCount: duplicateCountForLand(land) });
-        after.alias = item.alias || '';
-        restoredConfirmed += 1;
-        changed = true;
-      } else if (isUnsafeGeneratedMapping(item) || item.manual) {
-        ignoredGenerated += 1;
+        if (!land) continue;
+        const key = cadLandKey(item.componentId, item.globalId);
+        const value = normalizeCadName(item.cadName).toUpperCase();
+        if (value && value !== normalizeCadName(land.originalCadName ?? land.cadName)) {
+          state.cadInspector.renames.set(key, value);
+          restoredCadNames += 1;
+        }
       }
-
-      if (changed) changes.push({ mapping, before: snapshotMapping(mapping), after });
+      applyCadNamesToProject({ silent: true });
     }
 
-    if (!changes.length) throw new Error('ไม่พบจุดที่ผู้ใช้ยืนยันจริงใน Backup นี้');
-    applyTransaction('Restore safe backup JSON', changes);
-    toast(`กู้คืน Confirmed ${formatInt.format(restoredConfirmed)} จุด${restoredNotes ? ` · หมายเหตุ ${formatInt.format(restoredNotes)}` : ''} · ตัด Mapping ที่ระบบกระจาย ${formatInt.format(ignoredGenerated)} จุด${skipped ? ` · ข้าม ${formatInt.format(skipped)}` : ''}`, 6500);
+    let restoredConfirmed = 0;
+    let restoredNotes = 0;
+    let ignoredGenerated = 0;
+    let skipped = 0;
+    let mappingChanges = 0;
+    if (state.mappingData && Array.isArray(payload.overrides)) {
+      const bySourceRow = new Map(state.mappingData.mappings.map((m) => [Number(m.sourceRow), m]));
+      const byKey = new Map(state.mappingData.mappings.map((m) => [`${m.componentName}\u0000${m.localIndex}`, m]));
+      const changes = [];
+      for (const item of payload.overrides) {
+        const mapping = bySourceRow.get(Number(item.sourceRow)) || byKey.get(`${item.componentName}\u0000${item.localIndex}`);
+        if (!mapping) { skipped += 1; continue; }
+        const method = String(item.mappingMethod || '');
+        let after = snapshotMapping(mapping);
+        let changed = false;
+        if (item.alias) { after.alias = String(item.alias); restoredNotes += 1; changed = true; }
+        if (item.mapped === false && method === 'manual-unmapped') {
+          after = { ...stateForUnmapped(mapping), alias: item.alias || '' };
+          changed = true;
+        } else if (trustedBackupItem(item) && item.mapped !== false && item.globalId != null) {
+          const component = state.xmlData.componentById.get(String(item.componentId || mapping.componentId));
+          const land = component?.lands.find((candidate) => Number(candidate.globalId) === Number(item.globalId));
+          if (!land) { skipped += 1; continue; }
+          after = stateForLand(mapping, land, { manual: true, verified: true, anchorLocked: Boolean(item.anchorLocked), confidence: 100, mappingMethod: item.anchorLocked ? 'manual-anchor' : 'manual-direct', duplicateCadNameCount: duplicateCountForLand(land) });
+          after.alias = item.alias || '';
+          restoredConfirmed += 1;
+          changed = true;
+        } else if (isUnsafeGeneratedMapping(item) || item.manual) ignoredGenerated += 1;
+        if (changed) changes.push({ mapping, before: snapshotMapping(mapping), after });
+      }
+      if (changes.length) { applyTransaction('Restore safe backup JSON', changes); mappingChanges = changes.length; }
+    }
+
+    if (!restoredCadNames && !mappingChanges) throw new Error('ไม่พบข้อมูลชื่อ CAD หรือจุด Mapping ที่กู้คืนได้ใน Backup นี้');
+    toast(`กู้คืนชื่อ CAD ${formatInt.format(restoredCadNames)} จุด${restoredConfirmed ? ` · Confirmed ${formatInt.format(restoredConfirmed)} จุด` : ''}${restoredNotes ? ` · หมายเหตุ ${formatInt.format(restoredNotes)}` : ''}${ignoredGenerated ? ` · ตัด Mapping ที่ระบบกระจาย ${formatInt.format(ignoredGenerated)} จุด` : ''}${skipped ? ` · ข้าม ${formatInt.format(skipped)}` : ''}`, 6500);
   } catch (error) { console.error(error); toast(`นำเข้า Backup ไม่สำเร็จ: ${error.message}`, 5200); }
   finally { els.restoreFile.value = ''; }
 }
@@ -1137,6 +1379,22 @@ els.dropZone.addEventListener('drop', (event) => { event.preventDefault(); els.d
 els.restoreButton.addEventListener('click', () => els.restoreFile.click());
 els.restoreFile.addEventListener('change', (event) => restoreBackup(event.target.files[0]));
 els.resetButton.addEventListener('click', resetProject); els.remapButton.addEventListener('click', runMapping);
+els.cadInspectorButton.addEventListener('click', openCadInspector);
+els.closeCadInspectorButton.addEventListener('click', closeCadInspector);
+els.cadInspectorOverlay.addEventListener('click', (event) => { if (event.target === els.cadInspectorOverlay) closeCadInspector(); });
+els.cadInspectorScope.addEventListener('change', () => { state.cadInspector.page = 1; refreshCadInspector(); });
+els.cadMaxLength.addEventListener('change', () => { state.cadInspector.page = 1; refreshCadInspector(); });
+els.cadNamePrefix.addEventListener('change', refreshCadInspector);
+els.cadIssueFilter.addEventListener('change', () => { state.cadInspector.page = 1; refreshCadInspector(); });
+els.cadInspectorSearch.addEventListener('input', () => { state.cadInspector.page = 1; refreshCadInspector(); });
+els.cadAutoFixButton.addEventListener('click', () => { refreshCadInspector(); generateCadNames(false); });
+els.cadRenameAllButton.addEventListener('click', () => { refreshCadInspector(); generateCadNames(true); });
+els.cadResetNamesButton.addEventListener('click', resetCadNames);
+els.cadExportReportButton.addEventListener('click', exportCadAuditReport);
+els.cadApplyNamesButton.addEventListener('click', () => applyCadNamesToProject());
+els.cadExportXmlButton.addEventListener('click', exportCorrectedCadXml);
+els.cadInspectorPrevPage.addEventListener('click', () => { state.cadInspector.page -= 1; renderCadInspectorTable(); });
+els.cadInspectorNextPage.addEventListener('click', () => { state.cadInspector.page += 1; renderCadInspectorTable(); });
 els.componentSelect.addEventListener('change', () => { state.selectedComponentId = els.componentSelect.value; state.selected = null; state.preview = null; state.page = 1; state.duplicateView.selectedName = ''; resetHistogramState(); clearDetails(); refreshDuplicateControls(); updateStats(); renderTable(); renderTeachPanel(); fitView(); renderHistogram(); renderDetailedHistogram(); });
 els.histogramBins.addEventListener('change', renderHistogram);
 els.expandHistogramButton.addEventListener('click', openDetailedHistogram);
@@ -1211,7 +1469,7 @@ els.canvas.addEventListener('pointerdown', (event) => { els.canvas.setPointerCap
 els.canvas.addEventListener('pointermove', (event) => { const point = getCanvasPoint(event); if (state.dragging && state.lastPointer) { state.view.offsetX += point.x - state.lastPointer.x; state.view.offsetY += point.y - state.lastPointer.y; state.lastPointer = point; draw(); els.tooltip.classList.add('hidden'); return; } state.hoveredLand = findNearestLand(point.x, point.y); showTooltip(event, state.hoveredLand); });
 els.canvas.addEventListener('pointerup', (event) => { const point = getCanvasPoint(event); const moved = state.dragStart ? Math.hypot(point.x - state.dragStart.x, point.y - state.dragStart.y) : 0; state.dragging = false; state.lastPointer = null; state.dragStart = null; if (moved < 4) selectLand(findNearestLand(point.x, point.y)); });
 els.canvas.addEventListener('pointercancel', () => { state.dragging = false; state.lastPointer = null; state.dragStart = null; }); els.canvas.addEventListener('pointerleave', () => els.tooltip.classList.add('hidden'));
-window.addEventListener('keydown', (event) => { const tag = document.activeElement?.tagName; if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) return; if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); } if (state.edit.enabled && event.key === 'ArrowLeft') { event.preventDefault(); advanceSelected(-1); } if (state.edit.enabled && event.key === 'ArrowRight') { event.preventDefault(); advanceSelected(1); } if (event.key === 'Escape') { setEditMode(false); closeTeachPanel(); closeDetailedHistogram(); } });
+window.addEventListener('keydown', (event) => { const tag = document.activeElement?.tagName; if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) return; if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); } if (state.edit.enabled && event.key === 'ArrowLeft') { event.preventDefault(); advanceSelected(-1); } if (state.edit.enabled && event.key === 'ArrowRight') { event.preventDefault(); advanceSelected(1); } if (event.key === 'Escape') { setEditMode(false); closeTeachPanel(); closeDetailedHistogram(); closeCadInspector(); } });
 window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); state.installPrompt = event; els.installButton.classList.remove('hidden'); });
 els.installButton.addEventListener('click', async () => { if (!state.installPrompt) return; state.installPrompt.prompt(); await state.installPrompt.userChoice; state.installPrompt = null; els.installButton.classList.add('hidden'); });
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.warn));

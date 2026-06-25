@@ -267,3 +267,61 @@ tbody tr.unverified-row { box-shadow: inset 2px 0 0 rgba(255,189,91,.38); }
   .edit-panel { top: 8px; right: 8px; left: 8px; width: auto; max-width: none; }
   .legend { flex-wrap: wrap; max-width: calc(100% - 24px); }
 }
+
+/* v0.7.0 CAD name inspector and corrected XML export */
+#cadInspectorButton:not(:disabled) { border-color: rgba(86,214,197,.36); background: rgba(86,214,197,.055); }
+.cad-inspector-dialog { width: min(1500px, 98vw); height: min(940px, 96vh); display: grid; grid-template-rows: auto auto auto auto auto minmax(0,1fr) auto; overflow: hidden; border-radius: 18px; }
+.cad-inspector-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 17px 20px; border-bottom: 1px solid var(--line-soft); background: rgba(12,20,33,.98); }
+.cad-inspector-header h2 { margin: 4px 0; font-size: 22px; }
+.cad-inspector-header p { margin: 0; color: var(--muted); font-size: 11px; }
+.cad-inspector-toolbar { display: grid; grid-template-columns: 180px 130px 165px 170px minmax(220px,1fr); gap: 9px; align-items: end; padding: 11px 14px; border-bottom: 1px solid var(--line-soft); background: rgba(255,255,255,.015); }
+.cad-inspector-toolbar label { min-width: 0; font-size: 10px; }
+.cad-inspector-toolbar input, .cad-inspector-toolbar select { min-height: 38px; }
+.cad-inspector-summary { display: grid; grid-template-columns: repeat(8, minmax(0,1fr)); gap: 7px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); }
+.cad-inspector-summary div { min-width: 0; padding: 8px 7px; border: 1px solid var(--line-soft); border-radius: 10px; background: rgba(255,255,255,.018); text-align: center; }
+.cad-inspector-summary span { display: block; color: var(--muted); font-size: 8px; }
+.cad-inspector-summary strong { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; font-size: 15px; }
+.cad-inspector-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px 4px; }
+.cad-inspector-actions button { min-height: 38px; font-size: 10px; }
+#cadInspectorMessage { margin: 0; padding: 5px 14px 10px; border-bottom: 1px solid var(--line-soft); }
+.cad-inspector-table-wrap { min-height: 0; overflow: auto; background: rgba(0,0,0,.08); }
+.cad-inspector-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.cad-inspector-table th, .cad-inspector-table td { padding: 7px 8px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; font-size: 10px; }
+.cad-inspector-table th { position: sticky; top: 0; z-index: 2; background: #111b2a; color: var(--muted); text-align: left; font-size: 9px; letter-spacing: .03em; }
+.cad-inspector-table th:nth-child(1) { width: 120px; }
+.cad-inspector-table th:nth-child(2) { width: 70px; }
+.cad-inspector-table th:nth-child(3) { width: 85px; }
+.cad-inspector-table th:nth-child(4), .cad-inspector-table th:nth-child(5) { width: 150px; }
+.cad-inspector-table th:nth-child(6) { width: 60px; }
+.cad-inspector-table th:nth-child(7) { width: 190px; }
+.cad-inspector-table th:nth-child(8) { width: 85px; }
+.cad-inspector-table tbody tr:hover { background: rgba(43,167,255,.045); }
+.cad-inspector-table tbody tr.cad-invalid-row { box-shadow: inset 3px 0 0 #ff8d76; }
+.cad-inspector-table tbody tr.cad-valid-row { box-shadow: inset 2px 0 0 rgba(102,227,159,.32); }
+.cad-name-input { width: 100%; min-width: 80px; padding: 6px 7px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: uppercase; }
+.cad-name-input.invalid { border-color: rgba(255,112,94,.74); background: rgba(255,75,55,.07); }
+.cad-name-original { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #b9cce3; }
+.cad-issue-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.cad-issue-chip { display: inline-flex; align-items: center; min-height: 21px; padding: 2px 6px; border: 1px solid var(--line-soft); border-radius: 999px; font-size: 8px; white-space: nowrap; }
+.cad-issue-chip.duplicate { color: #ffd0f2; border-color: rgba(255,91,211,.32); background: rgba(255,91,211,.08); }
+.cad-issue-chip.too-long { color: #ffd6ad; border-color: rgba(255,166,79,.34); background: rgba(255,166,79,.07); }
+.cad-issue-chip.blank { color: #ffbdb5; border-color: rgba(255,112,94,.36); background: rgba(255,112,94,.08); }
+.cad-issue-chip.ok { color: #bff8d4; border-color: rgba(102,227,159,.34); background: rgba(102,227,159,.07); }
+.cad-issue-chip.changed { color: #bde9ff; border-color: rgba(43,167,255,.34); background: rgba(43,167,255,.07); }
+.cad-row-action { padding: 6px 8px; font-size: 9px; }
+.cad-inspector-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line-soft); background: rgba(12,20,33,.98); color: var(--muted); font-size: 10px; }
+.cad-inspector-footer div { display: flex; align-items: center; gap: 8px; }
+.cad-inspector-footer button { min-width: 36px; padding: 6px 9px; }
+@media (max-width: 1120px) {
+  .cad-inspector-toolbar { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .cad-inspector-search { grid-column: span 2; }
+  .cad-inspector-summary { grid-template-columns: repeat(4, minmax(0,1fr)); }
+}
+@media (max-width: 720px) {
+  .cad-inspector-dialog { width: 100vw; height: 100vh; border-radius: 0; }
+  .cad-inspector-toolbar { grid-template-columns: 1fr 1fr; max-height: 230px; overflow: auto; }
+  .cad-inspector-search { grid-column: 1 / -1; }
+  .cad-inspector-summary { grid-template-columns: repeat(2, minmax(0,1fr)); max-height: 170px; overflow: auto; }
+  .cad-inspector-actions { overflow-x: auto; flex-wrap: nowrap; }
+  .cad-inspector-actions button { flex: 0 0 auto; }
+}

@@ -25,5 +25,12 @@ assert(html.includes('duplicatePositionList'));
 assert(app.includes('duplicateGroupsForComponent'));
 assert(app.includes('fitDuplicateGroup'));
 assert(app.includes('เส้นประบนกราฟิก'));
+
+assert(html.includes('cadInspectorOverlay'));
+assert(html.includes('cadExportXmlButton'));
+assert(html.includes('cadMaxLength'));
+assert(app.includes('buildCadNameAudit'));
+assert(app.includes('rewriteCadXml'));
+assert(app.includes('exportCorrectedCadXml'));
 assert.equal(/Result code|result_code/i.test(html + app + parser), false);
 console.log('static DOM and removed-result checks passed');

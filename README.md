@@ -1,45 +1,52 @@
-# BGA Land Mapper PWA v0.6.0
+# BGA Land Mapper PWA v0.7.0
 
-PWA สำหรับเปิด CAD XML และข้อมูล X-ray XLSX/ZIP แล้วแสดงตำแหน่ง Land บนกราฟิก โดยเวอร์ชันนี้เปลี่ยนลอจิกเป็น Safe Mapping เพื่อไม่ยืนยัน Mapping จากลำดับ XML โดยอัตโนมัติ
+PWA แบบ Static สำหรับอ่าน CAD XML และข้อมูลดิบ X-ray ภายในเบราว์เซอร์ แสดงตำแหน่ง BGA, Measurement Histogram, Safe Manual Mapping และตรวจความถูกต้องของชื่อ Land ก่อนส่งออก CAD XML
 
-## สิ่งที่แก้ใน v0.6.0
+## CAD Name Inspector
 
-- ลำดับ XML เป็นเพียง `Auto guess / Unverified` ไม่ถือว่า Mapping ถูกต้อง
-- จุดที่ถือว่า `Confirmed` ต้องมาจากการคลิกใน Edit Mode หรือ Manual Anchor ที่ผู้ใช้ยืนยัน
-- ตัดการกระจาย `taught-forward` แบบทั้งชุด
-- Pattern เติมได้เฉพาะช่วงระหว่าง Anchor อย่างน้อย 2 จุดที่พิสูจน์ลำดับ +1 หรือ -1 ได้ตรงกันพอดี
-- Pattern ที่ Apply ยังคงเป็นข้อเสนอ ไม่ใช่ Confirmed
-- กู้คืน Backup v0.5.0 แบบปลอดภัย: เก็บ Manual Anchor จริงและหมายเหตุ แต่ละทิ้ง Mapping ที่ระบบกระจายหรือสลับให้เอง
+เปิดจากปุ่ม **ตรวจชื่อ CAD** หลังนำเข้า XML โดยไม่จำเป็นต้องมี XLSX
 
-## Fast Edit Mode
+- ตรวจชื่อซ้ำภายใน Part เดียวกัน
+- ตรวจชื่อว่าง
+- ตรวจชื่อยาวเกินค่าที่เครื่องรองรับ ค่าเริ่มต้น 5 ตัวอักษร
+- เลือกตรวจทั้ง CAD, เฉพาะ Part ในข้อมูลดิบ หรือ Part ที่กำลังดู
+- ค้นหาจาก Part, XML ID, Local index หรือชื่อ Land
+- แก้ชื่อในตารางได้โดยตรง
+- แก้อัตโนมัติเฉพาะชื่อที่มีปัญหา โดยรักษาชื่อที่ผ่านแล้ว
+- สร้างชื่อใหม่ทั้งขอบเขตเมื่อจำเป็น
+- ชื่ออัตโนมัติใช้ A-Z และ 0-9 และรับประกันไม่ซ้ำภายใน Part
+- Apply ชื่อใหม่เพื่อแสดงในกราฟิกและ Mapping Table
+- Export รายงานตรวจสอบเป็น CSV
+- Export CAD XML ฉบับแก้ไข
 
-1. เปิดไฟล์ ZIP หรือ XML + XLSX
-2. กด `โหมด Edit`
-3. เลือก X-ray Land จากตารางหรือค้นหาเลข Land
-4. คลิก CAD Land ที่ถูกต้องบนกราฟิก
-5. จุดนั้นจะเป็น Confirmed ทันที
-6. หากเปิด `เลื่อนไป X-ray ถัดไปอัตโนมัติ` โปรแกรมจะเลือกแถวถัดไปให้พร้อมคลิกต่อ
+ปุ่ม Export XML จะเปิดใช้งานเมื่อชื่อทั้งหมดใน CAD ไม่ซ้ำภายใน Part, ไม่ว่าง และไม่เกินความยาวที่ตั้งไว้
 
-เมื่อ CAD Land เป้าหมายถูกใช้โดย Auto guess ของแถวอื่น ระบบจะ Unmap แถวนั้นโดยไม่สลับตำแหน่งเดิมไปให้ เพราะการสลับอัตโนมัติอาจสร้างความผิดพลาดต่อเนื่อง หากเป้าหมายถูก Confirmed อยู่แล้ว ระบบจะถามก่อน
+## วิธีใช้งานย่อ
 
-## สถานะ Mapping
+1. เปิด ZIP หรือ CAD XML
+2. กด **ตรวจชื่อ CAD**
+3. ตั้งความยาวสูงสุด เช่น 5 และ Prefix เช่น `L`
+4. ตรวจรายการปัญหา หรือกด **แก้เฉพาะชื่อที่มีปัญหา**
+5. แก้ชื่อเองเพิ่มเติมได้ในคอลัมน์ชื่อสุดท้าย
+6. กด **ใช้ชื่อใหม่ในโปรเจกต์** เพื่อตรวจตำแหน่งบนกราฟิก
+7. เมื่อปัญหาเป็น 0 กด **Export CAD XML**
 
-- `Confirmed`: ผู้ใช้ยืนยันด้วย Edit Mode/Anchor
-- `Unverified`: Auto order หรือ Pattern suggestion
-- `Unmapped`: ยังไม่มีตำแหน่ง CAD
+## การตั้งชื่ออัตโนมัติ
 
-## การติดตั้งบน GitHub Pages
+ระบบรักษาชื่อเดิมที่ถูกต้องไว้ ชื่อซ้ำจะเก็บตำแหน่งแรกไว้และเปลี่ยนเฉพาะตำแหน่งที่ซ้ำหลังจากนั้น ส่วนชื่อว่างหรือยาวเกินจะถูกสร้างใหม่ เช่น `L0001`, `L0002` โดยตรวจไม่ให้ชนกับชื่อเดิมใน Part
 
-อัปโหลดไฟล์ทั้งหมดในโฟลเดอร์นี้ไว้ที่ root ของ repository แล้วเปิด GitHub Pages จาก branch `main` และโฟลเดอร์ `/ (root)` ไม่ต้อง build และไม่ต้องติดตั้ง dependency
+## ฟังก์ชันเดิม
 
-## ทดสอบ
+- อ่าน ZIP ที่มี XML + XLSX หรือเปิดไฟล์แยก
+- แสดงเฉพาะ Part ที่มีในข้อมูลดิบสำหรับ Mapping
+- Measurement Histogram แบบละเอียด
+- แสดงตำแหน่งชื่อ CAD ซ้ำบนกราฟิก
+- Fast Edit Mode สำหรับยืนยัน Mapping ทีละจุด
+- Safe Pattern ระหว่าง Anchor
+- Backup/Restore JSON รวมชื่อ CAD ที่แก้
+- Export Mapping CSV
+- PWA Offline บน GitHub Pages
 
-```bash
-node tests/test-app-smoke.mjs
-node tests/test-static.mjs
-node tests/test-safe-edit-static.mjs
-node tests/test-manual-pattern.mjs
-node tests/test-parsers.mjs /path/to/project.zip
-node tests/test-duplicates.mjs /path/to/project.zip
-node tests/test-raw-part-filter.mjs
-```
+## Deploy บน GitHub Pages
+
+อัปโหลดไฟล์ภายในโฟลเดอร์ `bga-land-mapper` ไปยัง root ของ repository แล้วเปิด GitHub Pages จาก branch `main` และโฟลเดอร์ `/ (root)` ไม่ต้อง build หรือ npm install
