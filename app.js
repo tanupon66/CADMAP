@@ -75,7 +75,7 @@ const els = {
   previewFormula: $('previewFormula'), previewWarning: $('previewWarning'), applyPatternButton: $('applyPatternButton'), applyHighButton: $('applyHighButton'),
   previewForwardButton: $('previewForwardButton'), previewReverseButton: $('previewReverseButton'), shiftAllPrevButton: $('shiftAllPrevButton'), shiftAllNextButton: $('shiftAllNextButton'), unmapRangeButton: $('unmapRangeButton'),
   componentReportOverlay: $('componentReportOverlay'), closeComponentReportButton: $('closeComponentReportButton'), cancelComponentReportButton: $('cancelComponentReportButton'),
-  componentReportScope: $('componentReportScope'), componentReportZones: $('componentReportZones'), componentReportLabels: $('componentReportLabels'), componentReportNameSource: $('componentReportNameSource'), componentReportResolution: $('componentReportResolution'), componentReportHeatmap: $('componentReportHeatmap'),
+  componentReportScope: $('componentReportScope'), componentReportZones: $('componentReportZones'), componentReportLabels: $('componentReportLabels'), componentReportNameSource: $('componentReportNameSource'), componentReportResolution: $('componentReportResolution'), componentReportHeatmap: $('componentReportHeatmap'), componentReportCompatibility: $('componentReportCompatibility'),
   componentReportPartCount: $('componentReportPartCount'), componentReportLandCount: $('componentReportLandCount'), componentReportZoneCount: $('componentReportZoneCount'), componentReportMeasurementCount: $('componentReportMeasurementCount'), componentReportMessage: $('componentReportMessage'), generateComponentReportButton: $('generateComponentReportButton'),
   toast: $('toast'), installButton: $('installButton'),
 };
@@ -571,6 +571,43 @@ function currentMappings() {
   if (!state.mappingData) return [];
   return state.mappingData.mappings.filter((mapping) => String(mapping.componentId) === String(state.selectedComponentId));
 }
+function cadOnlyTableRow(component, land) {
+  return {
+    cadOnly: true, land, sourceRow: null, rawOrder: null, rawLandId: '', localIndex: null, cadLocalIndex: land.localIndex,
+    componentName: component.name || `ID ${component.id}`, packageName: component.packageName || '', componentId: component.id,
+    globalId: land.globalId, cadName: land.cadName || '', left: land.left, top: land.top, centerX: land.centerX, centerY: land.centerY,
+    width: land.width, length: land.length, measurement: null, confidence: null, mapped: true, manual: false, verified: false,
+    anchorLocked: false, mappingMethod: 'cad-only', duplicateCadNameCount: duplicateCountForLand(land), raw: null,
+  };
+}
+function cadLocalIndexFor(mapping, component = currentComponent()) {
+  if (mapping?.cadLocalIndex != null) return mapping.cadLocalIndex;
+  if (!component || mapping?.globalId == null) return null;
+  const land = component.lands.find((item) => Number(item.globalId) === Number(mapping.globalId));
+  return land?.localIndex ?? null;
+}
+function currentTableRows() {
+  const component = currentComponent();
+  if (!component) return [];
+  const mappings = currentMappings();
+  const byGlobal = new Map();
+  for (const mapping of mappings) {
+    if (!mapping.mapped || mapping.globalId == null) continue;
+    const key = Number(mapping.globalId);
+    if (!byGlobal.has(key)) byGlobal.set(key, []);
+    byGlobal.get(key).push(mapping);
+  }
+  const rows = [];
+  const included = new Set();
+  for (const land of component.lands) {
+    const matched = byGlobal.get(Number(land.globalId)) || [];
+    if (matched.length) {
+      for (const mapping of matched) { rows.push(mapping); included.add(mapping); }
+    } else rows.push(cadOnlyTableRow(component, land));
+  }
+  for (const mapping of mappings) if (!included.has(mapping)) rows.push(mapping);
+  return rows;
+}
 function mappingByGlobalId() {
   const map = new Map();
   for (const mapping of currentMappings()) if (mapping.globalId != null) map.set(Number(mapping.globalId), mapping);
@@ -762,39 +799,37 @@ function populateComponents(preferredId = null) {
   els.componentSelect.innerHTML = '';
   if (!state.xmlData) { state.selectedComponentId = null; return; }
   const summaries = state.mappingData?.componentSummaries || [];
-  const matched = [];
-
-  if (summaries.length) {
-    const seen = new Set();
-    for (const summary of summaries) {
-      if (summary.componentId == null || seen.has(String(summary.componentId))) continue;
-      seen.add(String(summary.componentId)); matched.push(summary);
-      const option = document.createElement('option'); option.value = String(summary.componentId);
-      option.textContent = `${summary.componentName || `ID ${summary.componentId}`} · Raw ${formatInt.format(summary.xrayCount)} / CAD ${formatInt.format(summary.xmlCount)} lands · ${summary.packageName || summary.cadPackageName || 'ไม่ทราบ package'}`;
-      els.componentSelect.append(option);
-    }
-    for (const summary of summaries.filter((item) => item.componentId == null)) {
-      const option = document.createElement('option'); option.disabled = true;
-      option.textContent = `${summary.componentName || 'ไม่ทราบชื่อ'} · ไม่พบ Part นี้ใน CAD · Raw ${formatInt.format(summary.xrayCount)} lands`;
-      els.componentSelect.append(option);
-    }
-    const allowedIds = new Set(matched.map((summary) => String(summary.componentId)));
-    const countMatchFirst = matched.find((summary) => summary.countMatch)?.componentId;
-    const chosenCandidate = preferredId ?? countMatchFirst ?? matched[0]?.componentId ?? null;
-    const chosen = chosenCandidate != null && allowedIds.has(String(chosenCandidate)) ? String(chosenCandidate) : (matched[0] ? String(matched[0].componentId) : null);
-    state.selectedComponentId = chosen; if (chosen != null) els.componentSelect.value = chosen;
-  } else {
-    const components = state.xmlData.components.filter((component) => component.lands?.length)
-      .sort((a, b) => (b.lands?.length || 0) - (a.lands?.length || 0) || String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
-    for (const component of components) {
-      const option = document.createElement('option'); option.value = String(component.id);
-      option.textContent = `${component.name || `ID ${component.id}`} · ${formatInt.format(component.lands.length)} lands · ${component.packageName || 'ไม่ทราบ package'}`;
-      els.componentSelect.append(option);
-    }
-    const allowed = new Set(components.map((component) => String(component.id)));
-    const chosen = preferredId != null && allowed.has(String(preferredId)) ? String(preferredId) : (components[0] ? String(components[0].id) : null);
-    state.selectedComponentId = chosen; if (chosen != null) els.componentSelect.value = chosen;
+  const summaryById = new Map();
+  for (const summary of summaries) {
+    if (summary.componentId == null) continue;
+    const key = String(summary.componentId);
+    if (!summaryById.has(key)) summaryById.set(key, summary);
   }
+  const components = state.xmlData.components
+    .filter((component) => component.lands?.length)
+    .sort((a, b) => {
+      const ar = summaryById.has(String(a.id)) ? 0 : 1;
+      const br = summaryById.has(String(b.id)) ? 0 : 1;
+      return ar - br || String(a.name).localeCompare(String(b.name), undefined, { numeric: true }) || (b.lands.length - a.lands.length);
+    });
+  for (const component of components) {
+    const summary = summaryById.get(String(component.id));
+    const option = document.createElement('option'); option.value = String(component.id);
+    const sourceLabel = summary ? `Raw ${formatInt.format(summary.xrayCount)} · CAD ${formatInt.format(component.lands.length)}` : `CAD only · ${formatInt.format(component.lands.length)} lands`;
+    option.textContent = `${component.name || `ID ${component.id}`} · ${component.packageName || 'ไม่ทราบ package'} · ${sourceLabel}`;
+    els.componentSelect.append(option);
+  }
+  for (const summary of summaries.filter((item) => item.componentId == null)) {
+    const option = document.createElement('option'); option.disabled = true;
+    option.textContent = `${summary.componentName || 'ไม่ทราบชื่อ'} · ไม่พบ Component นี้ใน CAD · Raw ${formatInt.format(summary.xrayCount)} rows`;
+    els.componentSelect.append(option);
+  }
+  const allowed = new Set(components.map((component) => String(component.id)));
+  const firstRaw = components.find((component) => summaryById.has(String(component.id)))?.id;
+  const chosenCandidate = preferredId ?? firstRaw ?? components[0]?.id ?? null;
+  const chosen = chosenCandidate != null && allowed.has(String(chosenCandidate)) ? String(chosenCandidate) : (components[0] ? String(components[0].id) : null);
+  state.selectedComponentId = chosen;
+  if (chosen != null) els.componentSelect.value = chosen;
   refreshDuplicateControls();
 }
 function updateStats() {
@@ -804,16 +839,9 @@ function updateStats() {
   els.verifiedStat.textContent = formatInt.format(stats?.verified ?? cadOnlySummary?.matchedLands ?? 0);
   els.unmappedStat.textContent = formatInt.format(stats?.unmapped ?? ((cadOnlySummary?.missingGenerated || 0) + (cadOnlySummary?.extraGenerated || 0)));
   const summaries = state.mappingData?.componentSummaries || [];
-  if (summaries.length) {
-    const shownComponentIds = [...new Set(summaries.filter((item) => item.componentId != null).map((item) => String(item.componentId)))];
-    const shownCadLands = shownComponentIds.reduce((sum, id) => sum + (state.xmlData?.componentById.get(id)?.lands.length || 0), 0);
-    els.xmlLandStat.textContent = formatInt.format(shownCadLands);
-    els.componentStat.textContent = formatInt.format(summaries.length);
-  } else {
-    els.xmlLandStat.textContent = formatInt.format(state.xmlData?.totalLands || 0);
-    els.componentStat.textContent = formatInt.format(state.xmlData?.components.filter((component) => component.lands?.length).length || 0);
-  }
-  const summary = summaries.find((item) => String(item.componentId) === String(state.selectedComponentId)) || summaries[0];
+  els.xmlLandStat.textContent = formatInt.format(state.xmlData?.totalLands || 0);
+  els.componentStat.textContent = formatInt.format(state.xmlData?.components.filter((component) => component.lands?.length).length || 0);
+  const summary = summaries.find((item) => String(item.componentId) === String(state.selectedComponentId));
   const anchors = currentMappings().filter((mapping) => mapping.anchorLocked).length;
   if (summary && stats) {
     const methods = [];
@@ -823,10 +851,12 @@ function updateStats() {
     if (stats.localOrderGuess) methods.push(`เดาลำดับ ${formatInt.format(stats.localOrderGuess)}`);
     if (stats.ambiguous) methods.push(`ชื่อกำกวม ${formatInt.format(stats.ambiguous)}`);
     els.mappingFormula.innerHTML = `Component ${summary.componentName}: คอลัมน์ ${columnName(state.schema?.landCol ?? 0)} · โหมด ${state.schema?.landMode || 'auto'} · รองรับตัวเลขและข้อความ<br>${methods.join(' · ') || 'ยังไม่พบคู่'} · Confirmed ${formatInt.format(stats.verified || 0)} · Anchor ${formatInt.format(anchors)}`;
-  } else if (canCompareCad() && state.cadCompare.result) els.mappingFormula.textContent = `Original CAD ↔ Generated CAD จับคู่โดย XML ID และพิกัดได้ ${formatInt.format(state.cadCompare.result.summary.matchedLands)} Land โดยไม่ต้องใช้ข้อมูลดิบ`;
+  } else if (state.mappingData && currentComponent()) els.mappingFormula.textContent = `${currentComponent().name}: CAD only · ไม่มีข้อมูลดิบของ Component นี้ แต่ยังดู แก้ชื่อ และ Export CAD ได้`;
+  else if (canCompareCad() && state.cadCompare.result) els.mappingFormula.textContent = `Original CAD ↔ Generated CAD จับคู่โดย XML ID และพิกัดได้ ${formatInt.format(state.cadCompare.result.summary.matchedLands)} Land โดยไม่ต้องใช้ข้อมูลดิบ`;
   else if (state.xmlData) els.mappingFormula.textContent = `${cadRoleLabel(state.activeCadRole)} เปิดแบบ CAD Viewer · อัปโหลด XLSX หรือ CAD อีกฝั่งเพื่อ Mapping`;
   else els.mappingFormula.textContent = 'ยังไม่มีสูตร Mapping';
   const ready = Boolean(state.xmlData && state.xlsxData && state.mappingData);
+  els.exportCsvButton.disabled = !state.xmlData;
   if (ready) els.projectStatus.textContent = `${availablePairLabel()} · ${formatInt.format(stats.verified || 0)} verified · ${formatInt.format(stats.unverified || 0)} unverified`;
   else if (canCompareCad() && state.cadCompare.result) els.projectStatus.textContent = `${availablePairLabel()} · ${formatInt.format(state.cadCompare.result.summary.matchedLands)} matched`;
   else if (state.xmlData) els.projectStatus.textContent = `${availablePairLabel()} · ${formatInt.format(state.xmlData.totalLands)} lands`;
@@ -834,7 +864,7 @@ function updateStats() {
   els.projectStatus.className = `status-pill ${state.xmlData ? 'ready' : 'muted'}`;
   els.remapButton.disabled = !state.xmlData || !state.xlsxData;
   els.cadInspectorButton.disabled = !state.xmlData;
-  els.exportCsvButton.disabled = !ready; els.exportExcelButton.disabled = !state.xmlData; els.exportJsonButton.disabled = !state.xmlData; els.restoreButton.disabled = !state.xmlData; els.teachButton.disabled = !ready;
+  els.exportCsvButton.disabled = !state.xmlData; els.exportExcelButton.disabled = !state.xmlData; els.exportJsonButton.disabled = !state.xmlData; els.restoreButton.disabled = !state.xmlData; els.teachButton.disabled = !ready;
   els.manualButton.disabled = !ready;
   populateActiveCadSelect(); updateCadCompareControls(); refreshHistoryButtons();
 }
@@ -916,16 +946,18 @@ function resetProject() {
   els.mappingTableBody.innerHTML = ''; clearDetails(); refreshDuplicateControls(); renderTeachPanel(); updateEditPanel(); updateStats(); renderCadCompare(); draw(); renderHistogram();
 }
 function filteredMappings() {
-  const mappings = currentMappings();
+  const mappings = currentTableRows();
   switch (state.filter) {
     case 'duplicate': return mappings.filter((m) => m.duplicateCadNameCount > 1);
-    case 'verified': return mappings.filter(isVerifiedMapping);
-    case 'unverified': return mappings.filter((m) => m.mapped && !isVerifiedMapping(m));
-    case 'unmapped': return mappings.filter((m) => !m.mapped);
+    case 'verified': return mappings.filter((m) => !m.cadOnly && isVerifiedMapping(m));
+    case 'unverified': return mappings.filter((m) => !m.cadOnly && m.mapped && !isVerifiedMapping(m));
+    case 'unmapped': return mappings.filter((m) => !m.cadOnly && !m.mapped);
+    case 'cad-only': return mappings.filter((m) => m.cadOnly);
     default: return mappings;
   }
 }
 function mappingStatus(mapping) {
+  if (mapping.cadOnly) return { text: 'CAD only', cls: 'cad-only' };
   if (!mapping.mapped) {
     if (Number(mapping.ambiguityCount) > 1) return { text: `Ambiguous ×${mapping.ambiguityCount}`, cls: 'unmapped' };
     return { text: 'Unmapped', cls: 'unmapped' };
@@ -942,14 +974,26 @@ function renderTable() {
   const all = filteredMappings(); const pages = Math.max(1, Math.ceil(all.length / state.pageSize)); state.page = Math.min(Math.max(1, state.page), pages);
   const start = (state.page - 1) * state.pageSize; const rows = all.slice(start, start + state.pageSize);
   const previewMappings = new Set(state.preview?.proposals.map((p) => p.mapping) || []); els.mappingTableBody.innerHTML = ''; const fragment = document.createDocumentFragment();
+  const component = currentComponent();
   for (const mapping of rows) {
-    const tr = document.createElement('tr'); if (state.selected === mapping) tr.classList.add('active'); if (isVerifiedMapping(mapping)) tr.classList.add('verified-row'); else if (mapping.mapped) tr.classList.add('unverified-row'); if (previewMappings.has(mapping)) tr.classList.add('preview-row');
-    const values = [mapping.localIndex, mapping.globalId, mapping.alias || mapping.cadName || 'Unmapped', Number.isFinite(mapping.centerX) ? formatFloat.format(mapping.centerX) : '—', Number.isFinite(mapping.centerY) ? formatFloat.format(mapping.centerY) : '—', mapping.measurement ?? '—', `${mapping.confidence ?? 0}%`];
+    const tr = document.createElement('tr');
+    const sameSelected = state.selected === mapping || (mapping.cadOnly && state.selected?.cadOnly && Number(state.selected.globalId) === Number(mapping.globalId));
+    if (sameSelected) tr.classList.add('active');
+    if (mapping.cadOnly) tr.classList.add('cad-only-row'); else if (isVerifiedMapping(mapping)) tr.classList.add('verified-row'); else if (mapping.mapped) tr.classList.add('unverified-row');
+    if (previewMappings.has(mapping)) tr.classList.add('preview-row');
+    const values = [
+      mapping.cadOnly ? '—' : (mapping.rawLandId ?? mapping.localIndex ?? '—'),
+      mapping.componentName || component?.name || '—', mapping.packageName || component?.packageName || '—', cadLocalIndexFor(mapping, component) ?? '—',
+      mapping.globalId ?? '—', mapping.alias || mapping.cadName || '—',
+      Number.isFinite(mapping.centerX) ? formatFloat.format(mapping.centerX) : '—', Number.isFinite(mapping.centerY) ? formatFloat.format(mapping.centerY) : '—',
+      Number.isFinite(mapping.width) ? formatFloat.format(mapping.width) : '—', Number.isFinite(mapping.length) ? formatFloat.format(mapping.length) : '—',
+      mapping.measurement ?? '—', mapping.mappingMethod || '—', mapping.confidence == null ? '—' : `${mapping.confidence}%`,
+    ];
     for (const value of values) { const td = document.createElement('td'); td.textContent = value; tr.append(td); }
     const status = mappingStatus(mapping); const statusTd = document.createElement('td'); const chip = document.createElement('span'); chip.className = `status-chip ${status.cls}`; chip.textContent = status.text; statusTd.append(chip); tr.append(statusTd);
     tr.addEventListener('click', () => selectMapping(mapping, true)); fragment.append(tr);
   }
-  els.mappingTableBody.append(fragment); els.tableSummary.textContent = `${formatInt.format(all.length)} รายการ`; els.pageLabel.textContent = `${state.page} / ${pages}`; els.prevPage.disabled = state.page <= 1; els.nextPage.disabled = state.page >= pages;
+  els.mappingTableBody.append(fragment); els.tableSummary.textContent = `${formatInt.format(all.length)} รายการ · CAD ${formatInt.format(component?.lands?.length || 0)} lands`; els.pageLabel.textContent = `${state.page} / ${pages}`; els.prevPage.disabled = state.page <= 1; els.nextPage.disabled = state.page >= pages;
 }
 function selectMapping(mapping, center = false) {
   state.selected = mapping; if (!state.edit.enabled) { state.manualMode = false; els.manualBanner.classList.add('hidden'); els.manualBanner.classList.remove('preview-active'); }
@@ -967,15 +1011,15 @@ function clearDetails() {
 function updateDetails() {
   const mapping = state.selected; if (!mapping) return clearDetails();
   els.selectedTitle.textContent = mapping.alias || mapping.cadName || `Land ${mapping.localIndex}`; els.selectedSubTitle.textContent = `${mapping.componentName || 'Unknown component'} · ${mapping.packageName || 'Unknown package'}`;
-  els.dLocal.textContent = mapping.localIndex ?? '—'; els.dGlobal.textContent = mapping.globalId ?? '—'; els.dCad.textContent = mapping.cadName || '—'; els.dComponent.textContent = mapping.componentName || '—';
+  els.dLocal.textContent = mapping.cadOnly ? '—' : (mapping.rawLandId ?? mapping.localIndex ?? '—'); els.dGlobal.textContent = mapping.globalId ?? '—'; els.dCad.textContent = mapping.cadName || '—'; els.dComponent.textContent = mapping.componentName || '—';
   els.dX.textContent = Number.isFinite(mapping.centerX) ? `${formatFloat.format(mapping.centerX)} mm` : '—'; els.dY.textContent = Number.isFinite(mapping.centerY) ? `${formatFloat.format(mapping.centerY)} mm` : '—';
   els.dMeasurement.textContent = mapping.measurement ?? '—'; els.dConfidence.textContent = `${mapping.confidence ?? 0}%${mapping.manual ? ' · manual' : ''}`; els.dRow.textContent = mapping.sourceRow ?? '—';
-  els.dMethod.textContent = mapping.mappingMethod || (mapping.manual ? 'manual' : 'auto'); els.dVerified.textContent = isVerifiedMapping(mapping) ? 'ยืนยันแล้ว' : 'ยังไม่ยืนยัน'; els.dAnchor.textContent = mapping.anchorLocked ? 'ล็อกแล้ว' : 'ไม่ล็อก';
-  els.aliasInput.disabled = false; els.saveAliasButton.disabled = false; els.copyRawButton.disabled = !mapping.raw; els.aliasInput.value = mapping.alias || '';
+  els.dMethod.textContent = mapping.mappingMethod || (mapping.manual ? 'manual' : 'auto'); els.dVerified.textContent = mapping.cadOnly ? 'CAD only' : (isVerifiedMapping(mapping) ? 'ยืนยันแล้ว' : 'ยังไม่ยืนยัน'); els.dAnchor.textContent = mapping.cadOnly ? '—' : (mapping.anchorLocked ? 'ล็อกแล้ว' : 'ไม่ล็อก');
+  els.aliasInput.disabled = Boolean(mapping.cadOnly); els.saveAliasButton.disabled = Boolean(mapping.cadOnly); els.copyRawButton.disabled = !mapping.raw; els.aliasInput.value = mapping.alias || '';
   els.rawData.textContent = mapping.raw ? mapping.raw.map((value, index) => `${columnName(index)}: ${value ?? ''}`).join('\n') : JSON.stringify(mapping, null, 2);
   if (mapping.duplicateCadNameCount > 1) { state.duplicateView.selectedName = String(mapping.cadName || '').trim(); els.duplicateNameSelect.value = state.duplicateView.selectedName; els.duplicateWarning.textContent = `ชื่อ CAD ${mapping.cadName} พบซ้ำ ${mapping.duplicateCadNameCount} ตำแหน่ง ระบบไฮไลต์ทุกตำแหน่งบนกราฟิกและเชื่อมด้วยเส้นประ`; els.duplicateWarning.classList.remove('hidden'); }
   else els.duplicateWarning.classList.add('hidden');
-  els.manualButton.disabled = !state.mappingData; els.anchorButton.disabled = !state.mappingData || !mapping.mapped; els.anchorButton.textContent = mapping.anchorLocked ? 'ปลด Anchor' : 'ล็อกเป็น Anchor'; els.unmapButton.disabled = !state.mappingData || !mapping.mapped; els.nudgePrevButton.disabled = !state.mappingData || !mapping.mapped; els.nudgeNextButton.disabled = !state.mappingData || !mapping.mapped;
+  els.manualButton.disabled = !state.mappingData; const editableMapping = Boolean(state.mappingData && !mapping.cadOnly && mapping.sourceRow != null); els.anchorButton.disabled = !editableMapping || !mapping.mapped; els.anchorButton.textContent = mapping.anchorLocked ? 'ปลด Anchor' : 'ล็อกเป็น Anchor'; els.unmapButton.disabled = !editableMapping || !mapping.mapped; els.nudgePrevButton.disabled = !editableMapping || !mapping.mapped; els.nudgeNextButton.disabled = !editableMapping || !mapping.mapped;
   document.querySelector('.right-panel')?.classList.add('open');
 }
 function getCanvasPoint(event) { const rect = els.canvas.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; }
@@ -1638,6 +1682,7 @@ function counterpartComponent(role, component) {
 }
 function reportComponents(scope = els.componentReportScope.value) {
   if (!state.xmlData) return [];
+  if (scope === 'all') return state.xmlData.components.filter((item) => item.lands?.length);
   if (scope === 'raw' && state.mappingData?.componentSummaries?.length) {
     const ids = [...new Set(state.mappingData.componentSummaries.filter((item) => item.componentId != null).map((item) => String(item.componentId)))];
     return ids.map((id) => state.xmlData.componentById.get(id)).filter(Boolean);
@@ -1716,8 +1761,12 @@ function reportFileStem(value) {
   return String(value || 'component').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9ก-๙_-]+/g, '_').replace(/^_+|_+$/g, '') || 'component';
 }
 async function generateComponentReport() {
-  const components = reportComponents();
+  let components = reportComponents();
   if (!components.length) return toast('ไม่พบ Component สำหรับสร้างรายงาน');
+  if (els.componentReportScope.value === 'all' && components.length > 80) {
+    toast(`CAD มี ${formatInt.format(components.length)} Components · รายงานภาพจำกัด 80 Components ต่อไฟล์เพื่อป้องกัน Excel ค้าง`, 5200);
+    components = components.slice(0, 80);
+  }
   const grid = Math.max(2, Math.min(4, Number(els.componentReportZones.value) || 3));
   const labels = els.componentReportLabels.value;
   const nameSource = els.componentReportNameSource.value;
@@ -1756,10 +1805,10 @@ async function generateComponentReport() {
     const nameSourceLabel = ({ active: `${cadRoleLabel(state.activeCadRole)} / ชื่อที่กำลังแสดง`, original: 'Original CAD', generated: 'Generated CAD' })[nameSource] || 'Active CAD';
     const blob = await buildComponentReportXlsx({
       title: `${state.xmlData.board?.Name || 'Board'} · Component CAD Report`, boardName: state.xmlData.board?.Name || '', cadFileName: state.fileNames.xml || activeCadFile()?.name || '', xlsxFileName: state.fileNames.xlsx || '',
-      generatedAt: new Date().toISOString(), zoneGrid: grid, nameSourceLabel, components: reportComponentsData,
+      generatedAt: new Date().toISOString(), zoneGrid: grid, nameSourceLabel, compatibilityMode: els.componentReportCompatibility?.checked !== false, components: reportComponentsData,
     });
     const scopeName = components.length === 1 ? components[0].name : 'raw_parts';
-    downloadBlob(blob, `${reportFileStem(state.xmlData.board?.Name)}_${reportFileStem(scopeName)}_component_report_v0.10.0.xlsx`);
+    downloadBlob(blob, `${reportFileStem(state.xmlData.board?.Name)}_${reportFileStem(scopeName)}_component_report_v0.11.0.xlsx`);
     els.componentReportMessage.textContent = `สร้าง Excel สำเร็จ · ${formatInt.format(components.length)} Component · ${formatInt.format(reportComponentsData.reduce((sum, item) => sum + item.rows.length, 0))} Land`;
     toast('สร้าง Component Report Excel สำเร็จ', 4200);
   } catch (error) {
@@ -1770,11 +1819,30 @@ async function generateComponentReport() {
 }
 
 function exportCsv() {
-  const mappings = state.mappingData?.mappings || [];
-  const headers = ['raw_land_identifier','raw_order','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','verified','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row'];
+  if (!state.xmlData) return toast('กรุณานำเข้า CAD ก่อน');
+  const headers = ['raw_land_identifier','raw_order','cad_local_index','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','verified','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row','record_type'];
   const lines = [headers.join(',')];
-  for (const m of mappings) lines.push([m.rawLandId ?? m.localIndex, m.rawOrder ?? '', m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.confidence, isVerifiedMapping(m), m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
-  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.10.0.csv`);
+  for (const component of state.xmlData.components.filter((item) => item.lands?.length)) {
+    const mappings = (state.mappingData?.mappings || []).filter((mapping) => String(mapping.componentId) === String(component.id));
+    const byGlobal = new Map();
+    for (const mapping of mappings) {
+      if (mapping.globalId == null) continue;
+      const key = Number(mapping.globalId);
+      if (!byGlobal.has(key)) byGlobal.set(key, []);
+      byGlobal.get(key).push(mapping);
+    }
+    const included = new Set();
+    for (const land of component.lands) {
+      const matched = byGlobal.get(Number(land.globalId)) || [];
+      const records = matched.length ? matched : [cadOnlyTableRow(component, land)];
+      for (const m of records) {
+        included.add(m);
+        lines.push([m.cadOnly ? '' : (m.rawLandId ?? m.localIndex), m.rawOrder ?? '', land.localIndex, land.globalId, m.alias || land.cadName || m.cadName || '', m.alias || '', component.name, component.packageName, land.centerX, land.centerY, land.left, land.top, land.width, land.length, m.measurement ?? '', m.confidence ?? '', m.cadOnly ? false : isVerifiedMapping(m), m.manual || false, m.anchorLocked || false, m.mappingMethod || 'cad-only', duplicateCountForLand(land), m.sourceRow ?? '', m.cadOnly ? 'cad-only' : 'mapping'].map(escapeCsv).join(','));
+      }
+    }
+    for (const m of mappings) if (!included.has(m)) lines.push([m.rawLandId ?? m.localIndex, m.rawOrder ?? '', '', m.globalId ?? '', m.cadName || '', m.alias || '', m.componentName || component.name, m.packageName || component.packageName, m.centerX ?? '', m.centerY ?? '', m.left ?? '', m.top ?? '', m.width ?? '', m.length ?? '', m.measurement ?? '', m.confidence ?? '', isVerifiedMapping(m), m.manual || false, m.anchorLocked || false, m.mappingMethod || 'unmapped', m.duplicateCadNameCount || 0, m.sourceRow ?? '', 'raw-only'].map(escapeCsv).join(','));
+  }
+  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'cad'}_cad_mapping_v0.11.0.csv`);
 }
 function exportJson() {
   const overrides = (state.mappingData?.mappings || [])
@@ -1784,8 +1852,8 @@ function exportJson() {
     const [componentId, globalId] = key.split('\u0000');
     return { componentId, globalId: Number(globalId), cadName };
   });
-  const payload = { app: 'BGA Land Mapper', version: '0.10.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, landMode: state.schema.landMode, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries, safeMapping: true, cadNameRules: { maxLength: state.cadInspector.maxLength, prefix: state.cadInspector.prefix }, cadNameOverrides, overrides };
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.10.0.json');
+  const payload = { app: 'BGA Land Mapper', version: '0.11.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, landMode: state.schema.landMode, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries, safeMapping: true, cadNameRules: { maxLength: state.cadInspector.maxLength, prefix: state.cadInspector.prefix }, cadNameOverrides, overrides };
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.11.0.json');
 }
 function trustedBackupItem(item) {
   const method = String(item?.mappingMethod || '');

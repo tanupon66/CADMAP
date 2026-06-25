@@ -1,6 +1,6 @@
 {
   "name": "bga-land-mapper",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
     "test:compare-real": "node tests/test-cad-compare-real.mjs",
     "test:dual-cad": "node tests/test-dual-cad-static.mjs",
     "test:xlsx-report": "node tests/test-xlsx-report.mjs",
-    "test:identifiers": "node tests/test-text-identifiers.mjs"
+    "test:identifiers": "node tests/test-text-identifiers.mjs",
+    "test:all-components": "node tests/test-all-components-table.mjs"
   }
 }

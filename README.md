@@ -1,64 +1,16 @@
-# BGA Land Mapper v0.10.0
+# BGA / CAD Component Mapper v0.11.0
 
-PWA แบบ Static สำหรับเปิด CAD XML, เปรียบเทียบ Original/Generated CAD, จับคู่ข้อมูลดิบ XLSX และแสดงตำแหน่ง Land บนกราฟิก โดยประมวลผลในเบราว์เซอร์ทั้งหมด
+## สิ่งที่เปลี่ยน
 
-## สิ่งที่แก้ใน v0.10.0
+- แสดงทุก Component ที่มี Land ใน CAD ไม่จำกัดเฉพาะ Component ที่พบในข้อมูลดิบหรือ BGA
+- เปิด CAD XML อย่างเดียวแล้วเลือกดู Component ใดก็ได้ทันที
+- Mapping Table รวมข้อมูล CAD โดยตรง: Component, Package, CAD local index, XML ID, CAD name, X/Y, Width/Length และวิธี Mapping
+- Land ที่ไม่มีข้อมูลดิบแสดงสถานะ `CAD only` แทน `Unmapped`
+- Export CSV ได้แม้มีเพียง CAD และรวมทั้ง CAD-only, Mapping และ Raw-only
+- Component Excel เพิ่ม Excel Compatibility mode และแก้ลำดับ OOXML Drawing/Page Setup
+- Compatibility mode ไม่ทำสำเนาตาราง Land ซ้ำทุก Zone ทำให้ไฟล์เล็กและเปิดง่ายขึ้น
+- Original CAD ↔ Generated CAD ↔ Raw Data, Edit Mode, CAD Name Inspector, Histogram และ Manual Mapping ยังอยู่ครบ
 
-### Land identifier ไม่บังคับเป็นตัวเลข
+## ใช้งาน
 
-คอลัมน์ Land สามารถเป็นได้ทั้ง:
-
-- ลำดับภายใน Part เช่น `1, 2, 3`
-- XML global Land ID เช่น `15351`
-- ชื่อ CAD แบบตัวอักษร/ตัวเลข เช่น `CU71`, `L0A0A`
-
-ระบบจะตรวจชนิดคอลัมน์อัตโนมัติและแสดงโหมดที่ใช้:
-
-- `local-index`
-- `global-id`
-- `cad-name`
-- `auto`
-
-ผู้ใช้สามารถเปลี่ยนคอลัมน์ `Land identifier` เองแล้วกดคำนวณ Mapping ใหม่ได้
-
-### Mapping ด้วยข้อมูลสองชุดใดก็ได้
-
-รองรับคู่หลักต่อไปนี้โดยไม่ต้องรอไฟล์ที่สาม:
-
-1. Original CAD ↔ Generated CAD
-2. Original CAD ↔ Raw XLSX
-3. Generated CAD ↔ Raw XLSX
-
-เมื่อมีครบสามชุด ระบบสามารถใช้ชื่อจาก CAD อีกฝั่งเป็นสะพาน เช่น Raw XLSX ใช้ชื่อ Generated CAD แต่กำลังแสดง Original CAD ระบบจะหา Generated Land จากชื่อแล้วส่งต่อด้วย XML ID/พิกัดมายัง Original Land
-
-### ระดับความน่าเชื่อถือ
-
-- `Name match` — ชื่อตรงกับ CAD ที่กำลังแสดง
-- `CAD bridge` — ชื่อตรงกับ CAD อีกฝั่งและเชื่อมกลับด้วย XML ID/พิกัด
-- `XML ID match` — ตรงกับ global Land ID
-- `Unverified` — ใช้ลำดับภายใน Part เป็นข้อเสนอ
-- `Ambiguous` — ชื่อซ้ำจนยังระบุตำแหน่งเดียวไม่ได้
-- `Unmapped` — ไม่พบคู่
-
-## ผลตรวจ test2.xlsx
-
-- แถวข้อมูล: 12,448
-- Component: U1
-- Auto detect เลือกคอลัมน์ M
-- โหมด: `global-id`
-- Mapped: 12,448
-- XML ID verified: 11,722
-- Local-order suggestions: 726
-- Unmapped: 0
-
-คอลัมน์ N มีค่าข้อความ เช่น `L0A0A` และสามารถเลือกเป็น Land identifier ได้ หากชื่อเหล่านี้ตรงกับ Generated CAD ระบบจะจับคู่ด้วยชื่อโดยตรง
-
-## การเปิด CAD อย่างเดียว
-
-อัปโหลด Original CAD หรือ Generated CAD เพียงไฟล์เดียว โปรแกรมจะแสดง CAD ทันทีโดยไม่ต้องมี XLSX
-
-## การใช้งานบน GitHub Pages
-
-นำไฟล์ทั้งหมดในโฟลเดอร์นี้ไปไว้ที่ Root ของ Repository แล้วเปิด GitHub Pages จาก branch `main` / root
-
-ไม่ต้องใช้ npm build และไม่ต้องมี Backend
+แตก ZIP แล้วอัปโหลดไฟล์ทั้งหมดไปที่ Root ของ GitHub Pages หรือ Cloudflare Pages ได้โดยตรง ไม่ต้อง build

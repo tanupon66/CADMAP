@@ -8,14 +8,14 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
-  <title>BGA Land Mapper v0.10.0</title>
+  <title>BGA Land Mapper v0.11.0</title>
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
       <img src="./icons/icon.svg" alt="" class="brand-icon" />
       <div>
-        <h1>BGA Land Mapper</h1>
+        <h1>BGA / CAD Component Mapper</h1>
         <p>Original CAD ↔ Generated CAD ↔ Raw Data</p>
       </div>
     </div>
@@ -167,6 +167,7 @@
               <option value="verified">Confirmed</option>
               <option value="unverified">ยังไม่ยืนยัน</option>
               <option value="unmapped">Unmapped</option>
+              <option value="cad-only">CAD only</option>
             </select>
             <button id="prevPage" type="button">‹</button>
             <span id="pageLabel">1 / 1</span>
@@ -175,7 +176,7 @@
         </div>
         <div class="table-scroll">
           <table>
-            <thead><tr><th>Raw identifier</th><th>XML ID</th><th>CAD Name</th><th>X</th><th>Y</th><th>Measurement</th><th>Confidence</th><th>Status</th></tr></thead>
+            <thead><tr><th>Raw identifier</th><th>Component</th><th>Package</th><th>CAD local</th><th>XML ID</th><th>CAD Name</th><th>X</th><th>Y</th><th>Width</th><th>Length</th><th>Measurement</th><th>Method</th><th>Confidence</th><th>Status</th></tr></thead>
             <tbody id="mappingTableBody"></tbody>
           </table>
         </div>
@@ -363,6 +364,7 @@
           <select id="componentReportScope">
             <option value="current">เฉพาะ Component ที่กำลังดู</option>
             <option value="raw">ทุก Part ที่พบในข้อมูลดิบ</option>
+            <option value="all">ทุก Component ที่มี Land ใน CAD (ตารางรวม)</option>
           </select>
         </label>
         <label>แบ่งภาพเป็นโซน
@@ -395,6 +397,7 @@
           </select>
         </label>
         <label class="toggle-row component-report-toggle"><input id="componentReportHeatmap" type="checkbox" checked /><span>ใช้สี Heatmap จาก Measurement</span></label>
+        <label class="toggle-row component-report-toggle"><input id="componentReportCompatibility" type="checkbox" checked /><span>Excel Compatibility — ลดข้อมูลซ้ำในชีต Zone เพื่อให้เปิดได้ง่ายขึ้น</span></label>
       </div>
 
       <div class="component-report-preview">

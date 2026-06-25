@@ -155,12 +155,13 @@ function sheetXml(sheet) {
   const columns = (sheet.columns || []).map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${Number(width) || 12}" customWidth="1"/>`).join('');
   const merges = (sheet.merges || []).map((ref) => `<mergeCell ref="${ref}"/>`).join('');
   const hyperlinksXml = hyperlinks.length ? `<hyperlinks>${hyperlinks.map((item) => `<hyperlink ref="${item.ref}" location="${xmlEscape(item.location)}" display="${xmlEscape(item.display ?? '')}"/>`).join('')}</hyperlinks>` : '';
-  const freeze = sheet.freeze ? `<sheetViews><sheetView workbookViewId="0"><pane xSplit="${sheet.freeze.columns || 0}" ySplit="${sheet.freeze.rows || 0}" topLeftCell="${columnName(sheet.freeze.columns || 0)}${(sheet.freeze.rows || 0) + 1}" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>` : '<sheetViews><sheetView workbookViewId="0"/></sheetViews>';
+  const freeze = sheet.freeze ? (() => { const cols = sheet.freeze.columns || 0; const rows = sheet.freeze.rows || 0; const activePane = cols && rows ? 'bottomRight' : cols ? 'topRight' : 'bottomLeft'; return `<sheetViews><sheetView workbookViewId="0"><pane${cols ? ` xSplit="${cols}"` : ''}${rows ? ` ySplit="${rows}"` : ''} topLeftCell="${columnName(cols)}${rows + 1}" activePane="${activePane}" state="frozen"/></sheetView></sheetViews>`; })() : '<sheetViews><sheetView workbookViewId="0"/></sheetViews>';
   const autoFilter = sheet.autoFilter ? `<autoFilter ref="${sheet.autoFilter}"/>` : '';
   const drawing = sheet.images?.length ? '<drawing r:id="rId1"/>' : '';
+  const dimension = `A1:${columnName(Math.max(0, maxCol - 1))}${Math.max(1, sheet.rows.length)}`;
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-${freeze}<sheetFormatPr defaultRowHeight="18"/>${columns ? `<cols>${columns}</cols>` : ''}<sheetData>${rowsXml}</sheetData>${autoFilter}${merges ? `<mergeCells count="${sheet.merges.length}">${merges}</mergeCells>` : ''}${hyperlinksXml}${drawing}<pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+<dimension ref="${dimension}"/>${freeze}<sheetFormatPr defaultRowHeight="18"/>${columns ? `<cols>${columns}</cols>` : ''}<sheetData>${rowsXml}</sheetData>${autoFilter}${merges ? `<mergeCells count="${sheet.merges.length}">${merges}</mergeCells>` : ''}${hyperlinksXml}<pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>${drawing}</worksheet>`;
 }
 
 function drawingXml(images) {
@@ -317,22 +318,21 @@ function makeDataSheet(component) {
   return { name: component.dataSheetName, rows, merges: [title.merge, `A2:${columnName(DATA_HEADERS.length - 1)}2`], columns: [12, 26, 10, 10, 12, 12, 14, 16, 16, 12, 12, 11, 11, 14, 12, 18, 14], freeze: { rows: 3, columns: 3 }, autoFilter: `A3:${columnName(DATA_HEADERS.length - 1)}${rows.length}`, images: [] };
 }
 
-function makeZoneSheet(component, zone) {
+function makeZoneSheet(component, zone, compact = true) {
   const width = DATA_HEADERS.length;
   const title = titleRow(`${component.name} · Zone ${zone.label}`, width);
-  const rows = [...title.rows,
-    row([{ v: `X ${zone.bounds.minX.toFixed(4)} – ${zone.bounds.maxX.toFixed(4)} · Y ${zone.bounds.minY.toFixed(4)} – ${zone.bounds.maxY.toFixed(4)} · ${zone.rows.length} lands`, style: 9 }], 28),
-    ...Array(44).fill(0).map(() => row([])),
-    row(DATA_HEADERS.map((v) => ({ v, style: 2 })), 30),
-  ];
+  if (compact) {
+    const rows = [...title.rows,
+      row([{ v: `X ${zone.bounds.minX.toFixed(4)} – ${zone.bounds.maxX.toFixed(4)} · Y ${zone.bounds.minY.toFixed(4)} – ${zone.bounds.maxY.toFixed(4)} · ${zone.rows.length} lands`, style: 9 }], 28),
+      row([{ v: 'เปิดชีต Land Data เพื่อดูข้อมูลครบทุก Land', style: 8, link: `'${component.dataSheetName.replace(/'/g, "''")}'!A1` }], 24),
+      ...Array(44).fill(0).map(() => row([])),
+    ];
+    return { name: zone.sheetName, rows, merges: [title.merge, `A2:${columnName(width - 1)}2`, `A3:${columnName(width - 1)}3`], columns: [12, 26, 10, 10, 12, 12, 14, 16, 16, 12, 12, 11, 11, 14, 12, 18, 14], images: [{ bytes: zone.imagePng, row: 4, col: 0, width: 1450, height: 800, name: `${component.name} zone ${zone.label}` }] };
+  }
+  const rows = [...title.rows, row([{ v: `X ${zone.bounds.minX.toFixed(4)} – ${zone.bounds.maxX.toFixed(4)} · Y ${zone.bounds.minY.toFixed(4)} – ${zone.bounds.maxY.toFixed(4)} · ${zone.rows.length} lands`, style: 9 }], 28), ...Array(44).fill(0).map(() => row([])), row(DATA_HEADERS.map((v) => ({ v, style: 2 })), 30)];
   for (const item of zone.rows) rows.push(row(dataRow(item)));
-  return {
-    name: zone.sheetName, rows, merges: [title.merge, `A2:${columnName(width - 1)}2`], columns: [12, 26, 10, 10, 12, 12, 14, 16, 16, 12, 12, 11, 11, 14, 12, 18, 14],
-    freeze: { rows: 47, columns: 3 }, autoFilter: zone.rows.length ? `A47:${columnName(width - 1)}${rows.length}` : null,
-    images: [{ bytes: zone.imagePng, row: 3, col: 0, width: 1450, height: 800, name: `${component.name} zone ${zone.label}` }],
-  };
+  return { name: zone.sheetName, rows, merges: [title.merge, `A2:${columnName(width - 1)}2`], columns: [12, 26, 10, 10, 12, 12, 14, 16, 16, 12, 12, 11, 11, 14, 12, 18, 14], freeze: { rows: 47, columns: 3 }, autoFilter: zone.rows.length ? `A47:${columnName(width - 1)}${rows.length}` : null, images: [{ bytes: zone.imagePng, row: 3, col: 0, width: 1450, height: 800, name: `${component.name} zone ${zone.label}` }] };
 }
-
 function makeHistogramSheet(component) {
   const title = titleRow(`${component.name} · Measurement Histogram`, 8);
   const rows = [...title.rows,
@@ -384,7 +384,7 @@ export async function buildComponentReportXlsx(report) {
   for (const component of report.components) {
     sheets.push(makeMapSheet(component, used));
     sheets.push(makeDataSheet(component));
-    for (const zone of component.zones) sheets.push(makeZoneSheet(component, zone));
+    for (const zone of component.zones) sheets.push(makeZoneSheet(component, zone, report.compatibilityMode !== false));
     if (component.histogram?.bins?.length) sheets.push(makeHistogramSheet(component));
   }
   const changes = makeNameChangesSheet(report, used); if (changes) sheets.push(changes);
