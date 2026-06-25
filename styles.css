@@ -325,3 +325,22 @@ tbody tr.unverified-row { box-shadow: inset 2px 0 0 rgba(255,189,91,.38); }
   .cad-inspector-actions { overflow-x: auto; flex-wrap: nowrap; }
   .cad-inspector-actions button { flex: 0 0 auto; }
 }
+
+/* v0.8.0 dual CAD import, comparison, and XML-only viewer */
+.cad-file-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.cad-file-actions button:last-of-type{grid-column:1/-1}
+.cad-compare-overlay{z-index:44}.cad-compare-dialog{width:min(1500px,96vw);height:min(920px,94vh);display:flex;flex-direction:column;overflow:hidden}
+.cad-compare-toolbar{display:grid;grid-template-columns:220px 210px minmax(260px,1fr) auto;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
+.cad-compare-toolbar label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+.cad-compare-toolbar input,.cad-compare-toolbar select{width:100%}
+.cad-compare-toolbar>button{align-self:end}
+.cad-compare-summary{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:8px;padding:12px 18px;border-bottom:1px solid var(--border)}
+.cad-compare-summary>div{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:9px 11px;display:flex;flex-direction:column;gap:4px}
+.cad-compare-summary span{font-size:11px;color:var(--muted)}.cad-compare-summary strong{font-size:18px}
+.cad-compare-table td:nth-child(3),.cad-compare-table td:nth-child(5){font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:700}
+.cad-compare-status{display:inline-flex;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:800;white-space:nowrap}
+.cad-compare-status.unchanged{background:rgba(102,227,159,.13);color:#8df1b8}.cad-compare-status.renamed{background:rgba(43,167,255,.14);color:#77c7ff}
+.cad-compare-status.moved,.cad-compare-status.renamed-moved{background:rgba(255,209,102,.13);color:#ffd166}.cad-compare-status.missing-generated,.cad-compare-status.extra-generated{background:rgba(255,107,117,.14);color:#ff8a92}
+.compare-locate-button{min-width:54px;padding:5px 7px}
+#cadCompareOverlayToggle:disabled+span{opacity:.48}
+@media(max-width:900px){.cad-compare-toolbar{grid-template-columns:1fr 1fr}.cad-compare-toolbar .cad-inspector-search{grid-column:1/-1}.cad-compare-summary{grid-template-columns:repeat(2,1fr)}}
+.dot.compare-original{background:transparent;border:2px solid #56d6c5}.dot.compare-generated{background:transparent;border:2px solid #ff75dc}

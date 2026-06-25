@@ -8,7 +8,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
-  <title>BGA Land Mapper v0.7.0</title>
+  <title>BGA Land Mapper v0.8.0</title>
 </head>
 <body>
   <header class="topbar">
@@ -38,14 +38,19 @@
         <label id="dropZone" class="drop-zone">
           <input id="projectFile" type="file" accept=".zip,.xml,.xlsx" hidden />
           <span class="drop-icon">⌁</span>
-          <strong>วาง ZIP ที่นี่ หรือคลิกเลือก</strong>
-          <small>รองรับ ZIP ที่มี XML + XLSX หรือเลือกไฟล์แยกทีละไฟล์</small>
+          <strong>วาง ZIP, XML หรือ XLSX ที่นี่</strong>
+          <small>การวาง XML จะถือเป็น Original CAD หรือใช้ปุ่มด้านล่างเพื่อระบุ Original / Generated</small>
         </label>
-        <div class="mini-actions">
+        <div class="mini-actions cad-file-actions">
+          <button id="originalCadButton" type="button">Original CAD</button>
+          <input id="originalCadFile" type="file" accept=".xml,application/xml,text/xml" hidden />
+          <button id="generatedCadButton" type="button">Generated CAD</button>
+          <input id="generatedCadFile" type="file" accept=".xml,application/xml,text/xml" hidden />
           <button id="restoreButton" type="button" disabled>นำเข้า Backup JSON</button>
           <input id="restoreFile" type="file" accept=".json,application/json" hidden />
         </div>
-        <div class="file-row"><span>CAD XML</span><strong id="xmlFileName">—</strong></div>
+        <div class="file-row"><span>Original CAD</span><strong id="xmlFileName">—</strong></div>
+        <div class="file-row"><span>Generated CAD</span><strong id="generatedXmlFileName">—</strong></div>
         <div class="file-row"><span>X-ray XLSX</span><strong id="xlsxFileName">—</strong></div>
         <div id="progressWrap" class="progress-wrap hidden"><div id="progressBar" class="progress-bar"></div></div>
         <p id="importMessage" class="helper-text">ไฟล์จะถูกประมวลผลในเครื่อง ไม่อัปโหลดไปยังเซิร์ฟเวอร์</p>
@@ -77,6 +82,9 @@
 
       <section class="panel-section">
         <span class="eyebrow">4. VIEW</span>
+        <label>CAD ที่แสดง
+          <select id="activeCadSelect"><option value="">— ยังไม่มี CAD —</option></select>
+        </label>
         <label>Component
           <select id="componentSelect"></select>
         </label>
@@ -84,6 +92,7 @@
         <label class="toggle-row"><input id="labelToggle" type="checkbox" /><span>แสดงชื่อ CAD เมื่อซูมเข้า</span></label>
         <label class="toggle-row duplicate-toggle"><input id="duplicateToggle" type="checkbox" checked /><span>ไฮไลต์ตำแหน่งชื่อ CAD ซ้ำ</span></label>
         <label class="toggle-row"><input id="duplicateOnlyToggle" type="checkbox" /><span>ทำตำแหน่งที่ไม่ซ้ำให้จาง</span></label>
+        <label class="toggle-row"><input id="cadCompareOverlayToggle" type="checkbox" disabled /><span>ซ้อน Original ↔ Generated</span></label>
         <label>ไปยังชื่อ CAD ซ้ำ
           <select id="duplicateNameSelect"><option value="">— เลือกชื่อซ้ำ —</option></select>
         </label>
@@ -105,6 +114,7 @@
         </div>
         <div class="toolbar-actions">
           <button id="cadInspectorButton" type="button" disabled>ตรวจชื่อ CAD</button>
+          <button id="cadCompareButton" type="button" disabled>เปรียบเทียบ CAD</button>
           <button id="manualButton" type="button" disabled>โหมด Edit</button>
           <button id="teachButton" type="button" disabled>Manual Teach</button>
           <button id="undoButton" type="button" disabled>Undo</button>
@@ -126,6 +136,8 @@
           <span><i class="dot selected"></i> จุดที่เลือก</span>
           <span><i class="dot confirmed"></i> ยืนยันด้วยตนเอง</span>
           <span><i class="dot duplicate"></i> ชื่อ CAD ซ้ำ</span>
+          <span class="compare-legend"><i class="dot compare-original"></i> Original</span>
+          <span class="compare-legend"><i class="dot compare-generated"></i> Generated</span>
         </div>
         <div id="manualBanner" class="manual-banner edit-panel hidden">
           <div class="edit-panel-heading"><strong>EDIT MODE</strong><button id="exitEditButton" class="edit-close" type="button" aria-label="ออกจากโหมด Edit">✕</button></div>
@@ -331,6 +343,66 @@
           <p class="helper-text">Safe Pattern ไม่ขยายออกนอก Anchor และผลที่ Apply ยังไม่ถือว่า Confirmed จนกว่าจะคลิกยืนยันใน Edit Mode</p>
         </section>
       </div>
+    </div>
+  </div>
+
+  <div id="cadCompareOverlay" class="modal-overlay cad-compare-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cadCompareTitle">
+    <div class="cad-compare-dialog panel">
+      <header class="cad-inspector-header">
+        <div>
+          <span class="eyebrow">ORIGINAL ↔ GENERATED CAD</span>
+          <h2 id="cadCompareTitle">จับคู่ CAD ใหม่กับ CAD เดิม</h2>
+          <p>จับคู่ Component และ Land ด้วย XML ID ก่อน แล้วใช้พิกัดเป็นแผนสำรองเพื่อแสดงชื่อเดิมเทียบกับชื่อใหม่</p>
+        </div>
+        <button id="closeCadCompareButton" class="icon-button" type="button" aria-label="ปิด">✕</button>
+      </header>
+
+      <div class="cad-compare-toolbar">
+        <label>ระยะจับคู่พิกัดสูงสุด (mm)
+          <input id="cadCompareTolerance" type="number" min="0.0001" max="10" step="0.001" value="0.08" />
+        </label>
+        <label>ตัวกรอง
+          <select id="cadCompareFilter">
+            <option value="changed">เฉพาะที่เปลี่ยน/มีปัญหา</option>
+            <option value="all">ทั้งหมด</option>
+            <option value="renamed">เปลี่ยนชื่อ</option>
+            <option value="moved">ตำแหน่งเปลี่ยน</option>
+            <option value="missing">หาไม่พบ</option>
+          </select>
+        </label>
+        <label class="cad-inspector-search">ค้นหา
+          <input id="cadCompareSearch" type="search" placeholder="Part, XML ID, ชื่อเดิมหรือชื่อใหม่" />
+        </label>
+        <button id="rebuildCadCompareButton" type="button">คำนวณใหม่</button>
+      </div>
+
+      <div class="cad-compare-summary">
+        <div><span>Component จับคู่</span><strong id="cadCompareComponents">0</strong></div>
+        <div><span>Land จับคู่</span><strong id="cadCompareMatched">0</strong></div>
+        <div><span>ชื่อเปลี่ยน</span><strong id="cadCompareRenamed">0</strong></div>
+        <div><span>ตำแหน่งเปลี่ยน</span><strong id="cadCompareMoved">0</strong></div>
+        <div><span>หายใน CAD ใหม่</span><strong id="cadCompareMissing">0</strong></div>
+        <div><span>เกินมาใน CAD ใหม่</span><strong id="cadCompareExtra">0</strong></div>
+      </div>
+
+      <div class="cad-inspector-actions">
+        <button id="useOriginalCadButton" type="button">แสดง Original CAD</button>
+        <button id="useGeneratedCadButton" class="primary" type="button">แสดง Generated CAD</button>
+        <button id="fitCadCompareButton" type="button">Fit คู่ที่เลือก</button>
+        <button id="exportCadCompareButton" type="button">Export Mapping CSV</button>
+      </div>
+      <p id="cadCompareMessage" class="helper-text">อัปโหลด Original CAD และ Generated CAD เพื่อเริ่มเปรียบเทียบ</p>
+
+      <div class="cad-inspector-table-wrap">
+        <table class="cad-inspector-table cad-compare-table">
+          <thead><tr><th>Part</th><th>Original XML</th><th>ชื่อเดิม</th><th>Generated XML</th><th>ชื่อใหม่</th><th>ระยะ</th><th>วิธีจับคู่</th><th>สถานะ</th><th></th></tr></thead>
+          <tbody id="cadCompareTableBody"></tbody>
+        </table>
+      </div>
+      <footer class="cad-inspector-footer">
+        <span id="cadCompareTableSummary">0 รายการ</span>
+        <div><button id="cadComparePrevPage" type="button">‹</button><span id="cadComparePageLabel">1 / 1</span><button id="cadCompareNextPage" type="button">›</button></div>
+      </footer>
     </div>
   </div>
 

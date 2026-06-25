@@ -23,20 +23,22 @@ import {
   normalizeCadName,
   rewriteCadXml,
 } from './cad-inspector.js';
+import { buildCadComparison, cadComparisonToCsv } from './cad-compare.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
   projectFile: $('projectFile'), dropZone: $('dropZone'), resetButton: $('resetButton'),
+  originalCadButton: $('originalCadButton'), originalCadFile: $('originalCadFile'), generatedCadButton: $('generatedCadButton'), generatedCadFile: $('generatedCadFile'),
   restoreButton: $('restoreButton'), restoreFile: $('restoreFile'),
-  xmlFileName: $('xmlFileName'), xlsxFileName: $('xlsxFileName'), importMessage: $('importMessage'),
+  xmlFileName: $('xmlFileName'), generatedXmlFileName: $('generatedXmlFileName'), xlsxFileName: $('xlsxFileName'), importMessage: $('importMessage'),
   progressWrap: $('progressWrap'), projectStatus: $('projectStatus'),
   componentColumn: $('componentColumn'), packageColumn: $('packageColumn'), landColumn: $('landColumn'),
   measurementColumn: $('measurementColumn'), remapButton: $('remapButton'),
   mappedStat: $('mappedStat'), verifiedStat: $('verifiedStat'), unmappedStat: $('unmappedStat'), xmlLandStat: $('xmlLandStat'), componentStat: $('componentStat'),
-  mappingFormula: $('mappingFormula'), componentSelect: $('componentSelect'), heatmapToggle: $('heatmapToggle'), labelToggle: $('labelToggle'),
-  duplicateToggle: $('duplicateToggle'), duplicateOnlyToggle: $('duplicateOnlyToggle'), duplicateNameSelect: $('duplicateNameSelect'), duplicateSummaryMini: $('duplicateSummaryMini'),
+  mappingFormula: $('mappingFormula'), activeCadSelect: $('activeCadSelect'), componentSelect: $('componentSelect'), heatmapToggle: $('heatmapToggle'), labelToggle: $('labelToggle'),
+  duplicateToggle: $('duplicateToggle'), duplicateOnlyToggle: $('duplicateOnlyToggle'), cadCompareOverlayToggle: $('cadCompareOverlayToggle'), duplicateNameSelect: $('duplicateNameSelect'), duplicateSummaryMini: $('duplicateSummaryMini'),
   fitButton: $('fitButton'), zoomInButton: $('zoomInButton'), zoomOutButton: $('zoomOutButton'),
-  searchInput: $('searchInput'), searchButton: $('searchButton'), cadInspectorButton: $('cadInspectorButton'), manualButton: $('manualButton'), teachButton: $('teachButton'),
+  searchInput: $('searchInput'), searchButton: $('searchButton'), cadInspectorButton: $('cadInspectorButton'), cadCompareButton: $('cadCompareButton'), manualButton: $('manualButton'), teachButton: $('teachButton'),
   undoButton: $('undoButton'), redoButton: $('redoButton'), exportCsvButton: $('exportCsvButton'), exportJsonButton: $('exportJsonButton'),
   canvas: $('cadCanvas'), viewerTitle: $('viewerTitle'), viewerSubtitle: $('viewerSubtitle'), tooltip: $('tooltip'), manualBanner: $('manualBanner'),
   editCurrentLabel: $('editCurrentLabel'), exitEditButton: $('exitEditButton'), editPrevButton: $('editPrevButton'), editNextButton: $('editNextButton'), editAutoNext: $('editAutoNext'), editLockConfirmed: $('editLockConfirmed'),
@@ -60,6 +62,9 @@ const els = {
   cadAuditTotal: $('cadAuditTotal'), cadAuditValid: $('cadAuditValid'), cadAuditUnresolved: $('cadAuditUnresolved'), cadAuditDuplicateGroups: $('cadAuditDuplicateGroups'), cadAuditDuplicateLands: $('cadAuditDuplicateLands'), cadAuditTooLong: $('cadAuditTooLong'), cadAuditBlank: $('cadAuditBlank'), cadAuditChanged: $('cadAuditChanged'),
   cadAutoFixButton: $('cadAutoFixButton'), cadRenameAllButton: $('cadRenameAllButton'), cadResetNamesButton: $('cadResetNamesButton'), cadExportReportButton: $('cadExportReportButton'), cadApplyNamesButton: $('cadApplyNamesButton'), cadExportXmlButton: $('cadExportXmlButton'), cadInspectorMessage: $('cadInspectorMessage'),
   cadInspectorTableBody: $('cadInspectorTableBody'), cadInspectorTableSummary: $('cadInspectorTableSummary'), cadInspectorPrevPage: $('cadInspectorPrevPage'), cadInspectorNextPage: $('cadInspectorNextPage'), cadInspectorPageLabel: $('cadInspectorPageLabel'),
+  cadCompareOverlay: $('cadCompareOverlay'), closeCadCompareButton: $('closeCadCompareButton'), cadCompareTolerance: $('cadCompareTolerance'), cadCompareFilter: $('cadCompareFilter'), cadCompareSearch: $('cadCompareSearch'), rebuildCadCompareButton: $('rebuildCadCompareButton'),
+  cadCompareComponents: $('cadCompareComponents'), cadCompareMatched: $('cadCompareMatched'), cadCompareRenamed: $('cadCompareRenamed'), cadCompareMoved: $('cadCompareMoved'), cadCompareMissing: $('cadCompareMissing'), cadCompareExtra: $('cadCompareExtra'), cadCompareMessage: $('cadCompareMessage'),
+  useOriginalCadButton: $('useOriginalCadButton'), useGeneratedCadButton: $('useGeneratedCadButton'), fitCadCompareButton: $('fitCadCompareButton'), exportCadCompareButton: $('exportCadCompareButton'), cadCompareTableBody: $('cadCompareTableBody'), cadCompareTableSummary: $('cadCompareTableSummary'), cadComparePrevPage: $('cadComparePrevPage'), cadCompareNextPage: $('cadCompareNextPage'), cadComparePageLabel: $('cadComparePageLabel'),
   teachOverlay: $('teachOverlay'), closeTeachButton: $('closeTeachButton'), teachComponentLabel: $('teachComponentLabel'),
   anchorCountLabel: $('anchorCountLabel'), anchorList: $('anchorList'), clearAnchorsButton: $('clearAnchorsButton'),
   patternDirection: $('patternDirection'), patternShift: $('patternShift'), patternStart: $('patternStart'), patternEnd: $('patternEnd'), preserveAnchors: $('preserveAnchors'),
@@ -76,7 +81,9 @@ const state = {
   edit: { enabled: false, autoNext: true, lockConfirmed: true },
   undoStack: [], redoStack: [], page: 1, pageSize: 80, filter: 'all',
   view: { scale: 1, offsetX: 0, offsetY: 0 }, dragging: false, lastPointer: null, dragStart: null,
-  fileNames: { xml: '', xlsx: '' }, installPrompt: null,
+  fileNames: { xml: '', generatedXml: '', xlsx: '' }, installPrompt: null,
+  cadFiles: { original: null, generated: null }, activeCadRole: null,
+  cadCompare: { result: null, tolerance: 0.08, filter: 'changed', search: '', page: 1, pageSize: 120, selectedRow: null, overlayEnabled: false },
   histogram: { rangeMin: null, rangeMax: null, selectedBin: null, hoveredBin: null, layout: null, drag: null, filterEnabled: false },
   duplicateView: { enabled: true, dimOthers: false, selectedName: '' },
   cadInspector: { renames: new Map(), maxLength: 5, prefix: 'L', scope: 'all', filter: 'issues', search: '', page: 1, pageSize: 120, audit: null },
@@ -87,6 +94,185 @@ const histogramCtx = els.measurementHistogram.getContext('2d');
 const detailedHistogramCtx = els.detailedHistogramCanvas.getContext('2d');
 const formatInt = new Intl.NumberFormat('th-TH');
 const formatFloat = new Intl.NumberFormat('th-TH', { maximumFractionDigits: 4 });
+
+function cadRoleLabel(role) { return role === 'generated' ? 'Generated CAD' : 'Original CAD'; }
+function activeCadFile() { return state.activeCadRole ? state.cadFiles[state.activeCadRole] : null; }
+function syncCadFileLabels() {
+  els.xmlFileName.textContent = state.cadFiles.original?.name || '—';
+  els.generatedXmlFileName.textContent = state.cadFiles.generated?.name || '—';
+  els.xlsxFileName.textContent = state.fileNames.xlsx || '—';
+}
+function populateActiveCadSelect() {
+  const previous = state.activeCadRole;
+  els.activeCadSelect.innerHTML = '';
+  for (const role of ['original', 'generated']) {
+    const file = state.cadFiles[role]; if (!file) continue;
+    const option = document.createElement('option'); option.value = role;
+    option.textContent = `${cadRoleLabel(role)} · ${file.data.components.length} parts · ${formatInt.format(file.data.totalLands)} lands`;
+    els.activeCadSelect.append(option);
+  }
+  if (!els.activeCadSelect.options.length) {
+    const option = document.createElement('option'); option.value = ''; option.textContent = '— ยังไม่มี CAD —'; els.activeCadSelect.append(option);
+    els.activeCadSelect.disabled = true;
+  } else {
+    els.activeCadSelect.disabled = false;
+    els.activeCadSelect.value = state.activeCadRole && state.cadFiles[state.activeCadRole] ? state.activeCadRole : (previous && state.cadFiles[previous] ? previous : els.activeCadSelect.options[0].value);
+  }
+}
+function saveActiveCadSession() {
+  const file = activeCadFile(); if (!file) return;
+  file.renames = state.cadInspector.renames;
+}
+function rebuildMappingForActiveCad() {
+  if (!state.xmlData || !state.xlsxData) {
+    state.schema = null; state.mappingData = null; state.selected = null; state.page = 1;
+    for (const select of [els.componentColumn, els.packageColumn, els.landColumn, els.measurementColumn]) select.innerHTML = '';
+    els.mappingTableBody.innerHTML = '';
+    return;
+  }
+  state.schema = autoDetectSchema(state.xlsxData.activeSheet.rows, state.xmlData);
+  populateSchemaControls();
+  state.mappingData = buildMappings(state.xmlData, state.xlsxData, state.schema);
+  normalizeMappings();
+  state.undoStack = []; state.redoStack = []; state.preview = null; state.selected = null; state.page = 1;
+}
+function activateCad(role, { rebuild = true, fit = true } = {}) {
+  const file = state.cadFiles[role]; if (!file) return false;
+  saveActiveCadSession();
+  state.activeCadRole = role;
+  state.xmlText = file.text; state.xmlData = file.data; state.fileNames.xml = file.name;
+  state.cadInspector.renames = file.renames || new Map(); file.renames = state.cadInspector.renames;
+  state.cadInspector.audit = null; state.selected = null; state.preview = null; state.page = 1; state.duplicateView.selectedName = '';
+  resetHistogramState();
+  if (rebuild) rebuildMappingForActiveCad();
+  populateActiveCadSelect();
+  populateComponents(state.selectedComponentId);
+  updateStats(); renderTable(); renderTeachPanel(); refreshDuplicateControls(); clearDetails();
+  if (fit) fitView(); else draw();
+  renderHistogram(); renderDetailedHistogram();
+  return true;
+}
+function storeCadFile(role, xmlText, name) {
+  const data = parseInspectionXml(xmlText);
+  state.cadFiles[role] = { role, name, text: xmlText, data, renames: new Map() };
+  if (role === 'generated') state.fileNames.generatedXml = name;
+  syncCadFileLabels(); populateActiveCadSelect();
+  return state.cadFiles[role];
+}
+function canCompareCad() { return Boolean(state.cadFiles.original?.data && state.cadFiles.generated?.data); }
+function rebuildCadComparison({ showToast = false } = {}) {
+  if (!canCompareCad()) { state.cadCompare.result = null; updateCadCompareControls(); return null; }
+  state.cadCompare.tolerance = Math.max(0.0001, Number(els.cadCompareTolerance.value) || state.cadCompare.tolerance || 0.08);
+  state.cadCompare.result = buildCadComparison(state.cadFiles.original.data, state.cadFiles.generated.data, { coordinateTolerance: state.cadCompare.tolerance, moveTolerance: 0.001 });
+  state.cadCompare.page = 1; state.cadCompare.selectedRow = null;
+  updateCadCompareControls(); renderCadCompare(); draw();
+  if (showToast) toast(`จับคู่ CAD ได้ ${formatInt.format(state.cadCompare.result.summary.matchedLands)} Land · เปลี่ยนชื่อ ${formatInt.format(state.cadCompare.result.summary.renamed + state.cadCompare.result.summary.renamedMoved)} จุด`);
+  return state.cadCompare.result;
+}
+function updateCadCompareControls() {
+  const ready = canCompareCad();
+  els.cadCompareButton.disabled = !ready;
+  els.cadCompareOverlayToggle.disabled = !ready || !state.cadCompare.result;
+  els.cadCompareOverlayToggle.checked = Boolean(state.cadCompare.overlayEnabled && ready && state.cadCompare.result);
+}
+function cadCompareStatusLabel(status) {
+  return ({ unchanged: 'ตรงกัน', renamed: 'เปลี่ยนชื่อ', moved: 'ตำแหน่งเปลี่ยน', 'renamed-moved': 'ชื่อและตำแหน่งเปลี่ยน', 'missing-generated': 'ไม่พบใน CAD ใหม่', 'extra-generated': 'เกินมาใน CAD ใหม่' })[status] || status;
+}
+function filteredCadCompareRows() {
+  const result = state.cadCompare.result; if (!result) return [];
+  const filter = state.cadCompare.filter;
+  const search = state.cadCompare.search.trim().toLowerCase();
+  return result.rows.filter((row) => {
+    let pass = true;
+    if (filter === 'changed') pass = row.status !== 'unchanged';
+    else if (filter === 'renamed') pass = row.status === 'renamed' || row.status === 'renamed-moved';
+    else if (filter === 'moved') pass = row.status === 'moved' || row.status === 'renamed-moved';
+    else if (filter === 'missing') pass = row.status === 'missing-generated' || row.status === 'extra-generated';
+    if (!pass || !search) return pass;
+    return [row.originalComponentName, row.generatedComponentName, row.originalGlobalId, row.generatedGlobalId, row.originalName, row.generatedName, row.status].some((value) => String(value ?? '').toLowerCase().includes(search));
+  });
+}
+function renderCadCompare() {
+  const result = state.cadCompare.result;
+  els.cadCompareTableBody.innerHTML = '';
+  if (!result) {
+    for (const id of ['cadCompareComponents','cadCompareMatched','cadCompareRenamed','cadCompareMoved','cadCompareMissing','cadCompareExtra']) els[id].textContent = '0';
+    els.cadCompareMessage.textContent = 'อัปโหลด Original CAD และ Generated CAD เพื่อเริ่มเปรียบเทียบ';
+    els.cadCompareTableSummary.textContent = '0 รายการ'; els.cadComparePageLabel.textContent = '1 / 1'; return;
+  }
+  const summary = result.summary;
+  els.cadCompareComponents.textContent = `${formatInt.format(summary.matchedComponents)} / ${formatInt.format(summary.originalComponents)}`;
+  els.cadCompareMatched.textContent = formatInt.format(summary.matchedLands);
+  els.cadCompareRenamed.textContent = formatInt.format(summary.renamed + summary.renamedMoved);
+  els.cadCompareMoved.textContent = formatInt.format(summary.moved + summary.renamedMoved);
+  els.cadCompareMissing.textContent = formatInt.format(summary.missingGenerated);
+  els.cadCompareExtra.textContent = formatInt.format(summary.extraGenerated);
+  els.cadCompareMessage.textContent = `จับคู่ XML ID ก่อน และใช้พิกัดภายใน ${formatFloat.format(summary.coordinateTolerance)} mm เป็นแผนสำรอง · Original ${state.cadFiles.original.name} ↔ Generated ${state.cadFiles.generated.name}`;
+  const rows = filteredCadCompareRows();
+  const pages = Math.max(1, Math.ceil(rows.length / state.cadCompare.pageSize));
+  state.cadCompare.page = Math.max(1, Math.min(pages, state.cadCompare.page));
+  const start = (state.cadCompare.page - 1) * state.cadCompare.pageSize;
+  const shown = rows.slice(start, start + state.cadCompare.pageSize);
+  for (const item of shown) {
+    const tr = document.createElement('tr');
+    if (state.cadCompare.selectedRow === item) tr.classList.add('active');
+    const values = [
+      item.originalComponentName || item.generatedComponentName || '—', item.originalGlobalId ?? '—', item.originalName || '—',
+      item.generatedGlobalId ?? '—', item.generatedName || '—', item.distance == null ? '—' : formatFloat.format(item.distance), item.landMethod,
+    ];
+    for (const value of values) { const td = document.createElement('td'); td.textContent = String(value); tr.append(td); }
+    const statusTd = document.createElement('td'); const badge = document.createElement('span'); badge.className = `cad-compare-status ${item.status}`; badge.textContent = cadCompareStatusLabel(item.status); statusTd.append(badge); tr.append(statusTd);
+    const actionTd = document.createElement('td'); const button = document.createElement('button'); button.type = 'button'; button.className = 'compare-locate-button'; button.textContent = 'ดู'; button.disabled = item.originalGlobalId == null && item.generatedGlobalId == null; button.addEventListener('click', () => locateCadCompareRow(item)); actionTd.append(button); tr.append(actionTd);
+    tr.addEventListener('dblclick', () => locateCadCompareRow(item));
+    els.cadCompareTableBody.append(tr);
+  }
+  if (!shown.length) { const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 9; td.className = 'empty-state'; td.textContent = 'ไม่พบรายการตามตัวกรอง'; tr.append(td); els.cadCompareTableBody.append(tr); }
+  els.cadCompareTableSummary.textContent = `${formatInt.format(rows.length)} รายการ · แสดง ${rows.length ? formatInt.format(start + 1) : 0}–${formatInt.format(Math.min(start + shown.length, rows.length))}`;
+  els.cadComparePageLabel.textContent = `${state.cadCompare.page} / ${pages}`;
+  els.cadComparePrevPage.disabled = state.cadCompare.page <= 1; els.cadCompareNextPage.disabled = state.cadCompare.page >= pages;
+}
+function openCadCompare() {
+  if (!canCompareCad()) return toast('กรุณาอัปโหลด Original CAD และ Generated CAD ก่อน');
+  if (!state.cadCompare.result) rebuildCadComparison();
+  els.cadCompareTolerance.value = state.cadCompare.tolerance;
+  els.cadCompareFilter.value = state.cadCompare.filter; els.cadCompareSearch.value = state.cadCompare.search;
+  renderCadCompare(); els.cadCompareOverlay.classList.remove('hidden');
+}
+function closeCadCompare() { els.cadCompareOverlay.classList.add('hidden'); }
+function locateCadCompareRow(row) {
+  state.cadCompare.selectedRow = row; state.cadCompare.overlayEnabled = true; updateCadCompareControls();
+  const role = row.originalGlobalId != null ? 'original' : 'generated';
+  activateCad(role, { rebuild: true, fit: false });
+  const componentId = role === 'original' ? row.originalComponentId : row.generatedComponentId;
+  if (componentId != null) {
+    const targetComponent = state.xmlData?.componentById.get(String(componentId));
+    let option = [...els.componentSelect.options].find((candidate) => candidate.value === String(componentId));
+    if (!option && targetComponent) {
+      option = document.createElement('option'); option.value = String(componentId);
+      option.textContent = `${targetComponent.name || `ID ${targetComponent.id}`} · CAD Compare · ${formatInt.format(targetComponent.lands.length)} lands`;
+      els.componentSelect.append(option);
+    }
+    state.selectedComponentId = String(componentId); els.componentSelect.value = String(componentId); refreshDuplicateControls();
+  }
+  const component = currentComponent();
+  const globalId = role === 'original' ? row.originalGlobalId : row.generatedGlobalId;
+  const land = component?.lands.find((candidate) => Number(candidate.globalId) === Number(globalId));
+  if (land) selectLand(land);
+  fitCadCompareRow(row); renderCadCompare(); closeCadCompare();
+}
+function fitCadCompareRow(row = state.cadCompare.selectedRow) {
+  if (!row) return toast('เลือกรายการที่ต้องการดูก่อน');
+  const lands = [];
+  if (Number.isFinite(Number(row.originalX)) && Number.isFinite(Number(row.originalY))) lands.push({ centerX: Number(row.originalX), centerY: Number(row.originalY) });
+  if (Number.isFinite(Number(row.generatedX)) && Number.isFinite(Number(row.generatedY))) lands.push({ centerX: Number(row.generatedX), centerY: Number(row.generatedY) });
+  fitLands(lands, 1.5);
+}
+function exportCadComparison() {
+  if (!state.cadCompare.result) return;
+  const original = (state.cadFiles.original?.name || 'original').replace(/\.xml$/i, '');
+  const generated = (state.cadFiles.generated?.name || 'generated').replace(/\.xml$/i, '');
+  downloadBlob(new Blob(['\ufeff', cadComparisonToCsv(state.cadCompare.result)], { type: 'text/csv;charset=utf-8' }), `${original}_to_${generated}_mapping.csv`);
+}
 
 
 function isVerifiedMapping(mapping) {
@@ -318,6 +504,8 @@ function applyCadNamesToProject({ silent = false } = {}) {
       if (land) mapping.duplicateCadNameCount = duplicateCountForLand(land);
     }
   }
+  saveActiveCadSession();
+  if (canCompareCad()) rebuildCadComparison();
   refreshDuplicateControls(); renderTable(); draw(); updateStats();
   if (state.selected) selectMapping(state.selected, false);
   if (!silent) toast(`นำชื่อใหม่ไปใช้ในโปรเจกต์แล้ว ${formatInt.format(state.cadInspector.renames.size)} จุด`);
@@ -538,33 +726,41 @@ function populateSchemaControls() {
 }
 function populateComponents(preferredId = null) {
   els.componentSelect.innerHTML = '';
+  if (!state.xmlData) { state.selectedComponentId = null; return; }
   const summaries = state.mappingData?.componentSummaries || [];
-  if (!summaries.length) { state.selectedComponentId = null; return; }
-
-  const seen = new Set();
   const matched = [];
-  for (const summary of summaries) {
-    if (summary.componentId == null || seen.has(String(summary.componentId))) continue;
-    seen.add(String(summary.componentId));
-    matched.push(summary);
-    const option = document.createElement('option');
-    option.value = String(summary.componentId);
-    option.textContent = `${summary.componentName || `ID ${summary.componentId}`} · Raw ${formatInt.format(summary.xrayCount)} / CAD ${formatInt.format(summary.xmlCount)} lands · ${summary.packageName || summary.cadPackageName || 'ไม่ทราบ package'}`;
-    els.componentSelect.append(option);
-  }
-  for (const summary of summaries.filter((item) => item.componentId == null)) {
-    const option = document.createElement('option');
-    option.disabled = true;
-    option.textContent = `${summary.componentName || 'ไม่ทราบชื่อ'} · ไม่พบ Part นี้ใน CAD · Raw ${formatInt.format(summary.xrayCount)} lands`;
-    els.componentSelect.append(option);
-  }
 
-  const allowedIds = new Set(matched.map((summary) => String(summary.componentId)));
-  const countMatchFirst = matched.find((summary) => summary.countMatch)?.componentId;
-  const chosenCandidate = preferredId ?? countMatchFirst ?? matched[0]?.componentId ?? null;
-  const chosen = chosenCandidate != null && allowedIds.has(String(chosenCandidate)) ? String(chosenCandidate) : (matched[0] ? String(matched[0].componentId) : null);
-  state.selectedComponentId = chosen;
-  if (chosen != null) els.componentSelect.value = chosen;
+  if (summaries.length) {
+    const seen = new Set();
+    for (const summary of summaries) {
+      if (summary.componentId == null || seen.has(String(summary.componentId))) continue;
+      seen.add(String(summary.componentId)); matched.push(summary);
+      const option = document.createElement('option'); option.value = String(summary.componentId);
+      option.textContent = `${summary.componentName || `ID ${summary.componentId}`} · Raw ${formatInt.format(summary.xrayCount)} / CAD ${formatInt.format(summary.xmlCount)} lands · ${summary.packageName || summary.cadPackageName || 'ไม่ทราบ package'}`;
+      els.componentSelect.append(option);
+    }
+    for (const summary of summaries.filter((item) => item.componentId == null)) {
+      const option = document.createElement('option'); option.disabled = true;
+      option.textContent = `${summary.componentName || 'ไม่ทราบชื่อ'} · ไม่พบ Part นี้ใน CAD · Raw ${formatInt.format(summary.xrayCount)} lands`;
+      els.componentSelect.append(option);
+    }
+    const allowedIds = new Set(matched.map((summary) => String(summary.componentId)));
+    const countMatchFirst = matched.find((summary) => summary.countMatch)?.componentId;
+    const chosenCandidate = preferredId ?? countMatchFirst ?? matched[0]?.componentId ?? null;
+    const chosen = chosenCandidate != null && allowedIds.has(String(chosenCandidate)) ? String(chosenCandidate) : (matched[0] ? String(matched[0].componentId) : null);
+    state.selectedComponentId = chosen; if (chosen != null) els.componentSelect.value = chosen;
+  } else {
+    const components = state.xmlData.components.filter((component) => component.lands?.length)
+      .sort((a, b) => (b.lands?.length || 0) - (a.lands?.length || 0) || String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
+    for (const component of components) {
+      const option = document.createElement('option'); option.value = String(component.id);
+      option.textContent = `${component.name || `ID ${component.id}`} · ${formatInt.format(component.lands.length)} lands · ${component.packageName || 'ไม่ทราบ package'}`;
+      els.componentSelect.append(option);
+    }
+    const allowed = new Set(components.map((component) => String(component.id)));
+    const chosen = preferredId != null && allowed.has(String(preferredId)) ? String(preferredId) : (components[0] ? String(components[0].id) : null);
+    state.selectedComponentId = chosen; if (chosen != null) els.componentSelect.value = chosen;
+  }
   refreshDuplicateControls();
 }
 function updateStats() {
@@ -573,23 +769,32 @@ function updateStats() {
   els.verifiedStat.textContent = formatInt.format(stats?.verified || 0);
   els.unmappedStat.textContent = formatInt.format(stats?.unmapped || 0);
   const summaries = state.mappingData?.componentSummaries || [];
-  const shownComponentIds = [...new Set(summaries.filter((item) => item.componentId != null).map((item) => String(item.componentId)))];
-  const shownCadLands = shownComponentIds.reduce((sum, id) => sum + (state.xmlData?.componentById.get(id)?.lands.length || 0), 0);
-  els.xmlLandStat.textContent = formatInt.format(shownCadLands);
-  els.componentStat.textContent = formatInt.format(summaries.length);
-  const summary = state.mappingData?.componentSummaries.find((item) => String(item.componentId) === String(state.selectedComponentId)) || state.mappingData?.componentSummaries[0];
+  if (summaries.length) {
+    const shownComponentIds = [...new Set(summaries.filter((item) => item.componentId != null).map((item) => String(item.componentId)))];
+    const shownCadLands = shownComponentIds.reduce((sum, id) => sum + (state.xmlData?.componentById.get(id)?.lands.length || 0), 0);
+    els.xmlLandStat.textContent = formatInt.format(shownCadLands);
+    els.componentStat.textContent = formatInt.format(summaries.length);
+  } else {
+    els.xmlLandStat.textContent = formatInt.format(state.xmlData?.totalLands || 0);
+    els.componentStat.textContent = formatInt.format(state.xmlData?.components.filter((component) => component.lands?.length).length || 0);
+  }
+  const summary = summaries.find((item) => String(item.componentId) === String(state.selectedComponentId)) || summaries[0];
   const anchors = currentMappings().filter((mapping) => mapping.anchorLocked).length;
   if (summary?.countMatch) {
     els.mappingFormula.innerHTML = `Component ${summary.componentName}: พบจำนวน Land ตรงกัน แต่ลำดับ XML เป็นเพียง Auto guess<br>Confirmed ${formatInt.format(stats?.verified || 0)} จุด · Anchor ${formatInt.format(anchors)} จุด`;
   } else if (summary) els.mappingFormula.textContent = `จำนวนไม่ตรงกัน: X-ray ${summary.xrayCount} / XML ${summary.xmlCount} · ต้องยืนยันด้วย Edit Mode`;
+  else if (state.xmlData) els.mappingFormula.textContent = `${cadRoleLabel(state.activeCadRole)} เปิดแบบ CAD Viewer · เพิ่ม XLSX เมื่อต้องการ Mapping กับข้อมูลดิบ`;
   else els.mappingFormula.textContent = 'ยังไม่มีสูตร Mapping';
   const ready = Boolean(state.xmlData && state.xlsxData && state.mappingData);
-  els.projectStatus.textContent = ready ? `พร้อม · ${formatInt.format(stats.verified || 0)} confirmed · ${formatInt.format(stats.unverified || 0)} unverified` : state.xmlData ? 'เปิด XML แล้ว' : 'ยังไม่ได้เปิดโปรเจกต์';
-  els.projectStatus.className = `status-pill ${ready ? 'ready' : 'muted'}`;
+  if (ready) els.projectStatus.textContent = `${cadRoleLabel(state.activeCadRole)} · ${formatInt.format(stats.verified || 0)} confirmed · ${formatInt.format(stats.unverified || 0)} unverified`;
+  else if (state.xmlData) els.projectStatus.textContent = `${cadRoleLabel(state.activeCadRole)} · ${formatInt.format(state.xmlData.totalLands)} lands`;
+  else els.projectStatus.textContent = 'ยังไม่ได้เปิดโปรเจกต์';
+  els.projectStatus.className = `status-pill ${state.xmlData ? 'ready' : 'muted'}`;
   els.remapButton.disabled = !state.xmlData || !state.xlsxData;
   els.cadInspectorButton.disabled = !state.xmlData;
   els.exportCsvButton.disabled = !ready; els.exportJsonButton.disabled = !state.xmlData; els.restoreButton.disabled = !state.xmlData; els.teachButton.disabled = !ready;
-  els.manualButton.disabled = !ready; refreshHistoryButtons();
+  els.manualButton.disabled = !ready;
+  populateActiveCadSelect(); updateCadCompareControls(); refreshHistoryButtons();
 }
 function runMapping() {
   if (!state.xmlData || !state.xlsxData) return;
@@ -602,35 +807,71 @@ function runMapping() {
   updateStats(); renderTable(); renderTeachPanel(); fitView(); draw(); renderHistogram();
   toast(`จับคู่สำเร็จ ${formatInt.format(state.mappingData.stats.mapped)} จาก ${formatInt.format(state.mappingData.stats.total)} รายการ`);
 }
-async function processFile(file) {
-  if (!file) return; setLoading(true, `กำลังเปิด ${file.name}…`); await nextFrame();
+async function processFile(file, cadRole = 'auto') {
+  if (!file) return;
+  setLoading(true, `กำลังเปิด ${file.name}…`); await nextFrame();
   try {
     const project = await extractProjectFiles(file);
-    if (project.xmlText) { state.xmlText = project.xmlText; state.fileNames.xml = project.names.xml || file.name; state.cadInspector.renames = new Map(); state.cadInspector.audit = null; els.importMessage.textContent = 'กำลังอ่าน Component และ Land จาก XML…'; await nextFrame(); state.xmlData = parseInspectionXml(project.xmlText); }
-    if (project.xlsxBuffer) { state.xlsxBuffer = project.xlsxBuffer; state.fileNames.xlsx = project.names.xlsx || file.name; els.importMessage.textContent = 'กำลังอ่านตารางผล X-ray จาก XLSX…'; await nextFrame(); state.xlsxData = await parseXlsx(project.xlsxBuffer); }
-    els.xmlFileName.textContent = state.fileNames.xml || '—'; els.xlsxFileName.textContent = state.fileNames.xlsx || '—';
-    if (state.xmlData) populateComponents(state.selectedComponentId);
-    if (state.xmlData && state.xlsxData) {
-      els.importMessage.textContent = 'กำลังตรวจหาคอลัมน์และสร้าง Mapping…'; await nextFrame();
-      state.schema = autoDetectSchema(state.xlsxData.activeSheet.rows, state.xmlData); populateSchemaControls();
-      state.mappingData = buildMappings(state.xmlData, state.xlsxData, state.schema); normalizeMappings(); resetHistogramState(); state.undoStack = []; state.redoStack = []; state.preview = null;
-      const firstMapped = state.mappingData.mappings.find((mapping) => mapping.mapped); populateComponents(firstMapped?.componentId); renderTable();
+    let importedRole = null;
+    if (project.xmlText) {
+      importedRole = cadRole === 'generated' ? 'generated' : 'original';
+      els.importMessage.textContent = `กำลังอ่าน ${cadRoleLabel(importedRole)}…`; await nextFrame();
+      storeCadFile(importedRole, project.xmlText, project.names.xml || file.name);
+    }
+    if (project.xlsxBuffer) {
+      state.xlsxBuffer = project.xlsxBuffer; state.fileNames.xlsx = project.names.xlsx || file.name;
+      els.importMessage.textContent = 'กำลังอ่านตารางผล X-ray จาก XLSX…'; await nextFrame();
+      state.xlsxData = await parseXlsx(project.xlsxBuffer);
+    }
+    syncCadFileLabels();
+
+    if (importedRole) {
+      const shouldActivate = !state.activeCadRole || state.activeCadRole === importedRole || importedRole === 'original' || !state.cadFiles.original;
+      if (shouldActivate) activateCad(importedRole, { rebuild: true, fit: true });
+      else if (state.xlsxData && state.xmlData) rebuildMappingForActiveCad();
+    } else if (state.xmlData && state.xlsxData) {
+      rebuildMappingForActiveCad(); populateComponents(state.selectedComponentId); fitView();
+    }
+
+    if (canCompareCad()) {
+      rebuildCadComparison();
+      const summary = state.cadCompare.result.summary;
+      els.importMessage.textContent = `พร้อมเปรียบเทียบ Original ↔ Generated · จับคู่ ${formatInt.format(summary.matchedLands)} Land · เปลี่ยนชื่อ ${formatInt.format(summary.renamed + summary.renamedMoved)} จุด`;
+      if (importedRole === 'generated') openCadCompare();
+    } else if (state.xmlData && state.xlsxData && state.mappingData) {
       const summaries = state.mappingData.componentSummaries;
       const matchedParts = summaries.filter((summary) => summary.matched).length;
       const exactParts = summaries.filter((summary) => summary.countMatch).length;
       const missingParts = summaries.length - matchedParts;
       els.importMessage.textContent = `พบข้อมูลดิบ ${formatInt.format(summaries.length)} Part · จับคู่กับ CAD ได้ ${formatInt.format(matchedParts)} Part · จำนวน Land ตรงกัน ${formatInt.format(exactParts)} Part${missingParts ? ` · ไม่พบใน CAD ${formatInt.format(missingParts)} Part` : ''}`;
-    } else els.importMessage.textContent = state.xmlData ? 'เปิด XML แล้ว กรุณาเลือก XLSX เพิ่ม' : 'เปิด XLSX แล้ว กรุณาเลือก XML เพิ่ม';
-    updateStats(); renderTeachPanel(); fitView(); draw(); renderHistogram();
-  } catch (error) { console.error(error); els.importMessage.textContent = `เกิดข้อผิดพลาด: ${error.message}`; toast(error.message, 5200); }
-  finally { setLoading(false); els.projectFile.value = ''; }
+    } else if (state.xmlData) {
+      els.importMessage.textContent = `เปิด ${cadRoleLabel(state.activeCadRole)} แล้ว · แสดง CAD ได้ทันทีโดยไม่ต้องมี XLSX`;
+    } else if (state.xlsxData) els.importMessage.textContent = 'เปิด XLSX แล้ว กรุณาเลือก Original CAD เพิ่ม';
+
+    populateComponents(state.selectedComponentId); updateStats(); renderTable(); renderTeachPanel(); refreshDuplicateControls(); draw(); renderHistogram();
+  } catch (error) {
+    console.error(error); els.importMessage.textContent = `เกิดข้อผิดพลาด: ${error.message}`; toast(error.message, 5200);
+  } finally {
+    setLoading(false); els.projectFile.value = ''; els.originalCadFile.value = ''; els.generatedCadFile.value = '';
+  }
 }
 function resetProject() {
-  Object.assign(state, { xmlText: null, xlsxBuffer: null, xmlData: null, xlsxData: null, schema: null, mappingData: null, selectedComponentId: null, selected: null, hoveredLand: null, manualMode: false, preview: null, edit: { enabled: false, autoNext: true, lockConfirmed: true }, undoStack: [], redoStack: [], page: 1, fileNames: { xml: '', xlsx: '' }, view: { scale: 1, offsetX: 0, offsetY: 0 }, dragStart: null, duplicateView: { enabled: true, dimOthers: false, selectedName: '' }, cadInspector: { renames: new Map(), maxLength: 5, prefix: 'L', scope: 'all', filter: 'issues', search: '', page: 1, pageSize: 120, audit: null } });
-  resetHistogramState(); els.histogramOverlay.classList.add('hidden'); els.cadInspectorOverlay.classList.add('hidden'); els.duplicateToggle.checked = true; els.duplicateOnlyToggle.checked = false;
-  els.xmlFileName.textContent = '—'; els.xlsxFileName.textContent = '—'; els.importMessage.textContent = 'ไฟล์จะถูกประมวลผลในเครื่อง ไม่อัปโหลดไปยังเซิร์ฟเวอร์';
-  for (const select of [els.componentColumn, els.packageColumn, els.landColumn, els.measurementColumn, els.componentSelect]) select.innerHTML = '';
-  els.mappingTableBody.innerHTML = ''; els.teachOverlay.classList.add('hidden'); clearDetails(); refreshDuplicateControls(); renderTeachPanel(); updateEditPanel(); updateStats(); draw(); renderHistogram();
+  Object.assign(state, {
+    xmlText: null, xlsxBuffer: null, xmlData: null, xlsxData: null, schema: null, mappingData: null,
+    selectedComponentId: null, selected: null, hoveredLand: null, manualMode: false, preview: null,
+    edit: { enabled: false, autoNext: true, lockConfirmed: true }, undoStack: [], redoStack: [], page: 1,
+    fileNames: { xml: '', generatedXml: '', xlsx: '' }, cadFiles: { original: null, generated: null }, activeCadRole: null,
+    cadCompare: { result: null, tolerance: 0.08, filter: 'changed', search: '', page: 1, pageSize: 120, selectedRow: null, overlayEnabled: false },
+    view: { scale: 1, offsetX: 0, offsetY: 0 }, dragStart: null,
+    duplicateView: { enabled: true, dimOthers: false, selectedName: '' },
+    cadInspector: { renames: new Map(), maxLength: 5, prefix: 'L', scope: 'all', filter: 'issues', search: '', page: 1, pageSize: 120, audit: null },
+  });
+  resetHistogramState();
+  for (const overlay of [els.histogramOverlay, els.cadInspectorOverlay, els.cadCompareOverlay, els.teachOverlay]) overlay.classList.add('hidden');
+  els.duplicateToggle.checked = true; els.duplicateOnlyToggle.checked = false; els.cadCompareOverlayToggle.checked = false;
+  syncCadFileLabels(); els.importMessage.textContent = 'ไฟล์จะถูกประมวลผลในเครื่อง ไม่อัปโหลดไปยังเซิร์ฟเวอร์';
+  for (const select of [els.componentColumn, els.packageColumn, els.landColumn, els.measurementColumn, els.componentSelect, els.activeCadSelect]) select.innerHTML = '';
+  els.mappingTableBody.innerHTML = ''; clearDetails(); refreshDuplicateControls(); renderTeachPanel(); updateEditPanel(); updateStats(); renderCadCompare(); draw(); renderHistogram();
 }
 function filteredMappings() {
   const mappings = currentMappings();
@@ -684,7 +925,7 @@ function updateDetails() {
   els.rawData.textContent = mapping.raw ? mapping.raw.map((value, index) => `${columnName(index)}: ${value ?? ''}`).join('\n') : JSON.stringify(mapping, null, 2);
   if (mapping.duplicateCadNameCount > 1) { state.duplicateView.selectedName = String(mapping.cadName || '').trim(); els.duplicateNameSelect.value = state.duplicateView.selectedName; els.duplicateWarning.textContent = `ชื่อ CAD ${mapping.cadName} พบซ้ำ ${mapping.duplicateCadNameCount} ตำแหน่ง ระบบไฮไลต์ทุกตำแหน่งบนกราฟิกและเชื่อมด้วยเส้นประ`; els.duplicateWarning.classList.remove('hidden'); }
   else els.duplicateWarning.classList.add('hidden');
-  els.manualButton.disabled = false; els.anchorButton.disabled = !mapping.mapped; els.anchorButton.textContent = mapping.anchorLocked ? 'ปลด Anchor' : 'ล็อกเป็น Anchor'; els.unmapButton.disabled = !mapping.mapped; els.nudgePrevButton.disabled = !mapping.mapped; els.nudgeNextButton.disabled = !mapping.mapped;
+  els.manualButton.disabled = !state.mappingData; els.anchorButton.disabled = !state.mappingData || !mapping.mapped; els.anchorButton.textContent = mapping.anchorLocked ? 'ปลด Anchor' : 'ล็อกเป็น Anchor'; els.unmapButton.disabled = !state.mappingData || !mapping.mapped; els.nudgePrevButton.disabled = !state.mappingData || !mapping.mapped; els.nudgeNextButton.disabled = !state.mappingData || !mapping.mapped;
   document.querySelector('.right-panel')?.classList.add('open');
 }
 function getCanvasPoint(event) { const rect = els.canvas.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; }
@@ -1075,6 +1316,39 @@ function drawGrid(width, height) {
   for (let x = startX; x < width; x += spacing) { ctx.moveTo(x, 0); ctx.lineTo(x, height); } for (let y = startY; y < height; y += spacing) { ctx.moveTo(0, y); ctx.lineTo(width, y); } ctx.stroke();
 }
 function previewStatusByGlobalId() { const map = new Map(); for (const [globalId, proposal] of state.preview?.lookup || []) map.set(globalId, proposal.status); return map; }
+function comparisonRowsForCurrentComponent() {
+  const result = state.cadCompare.result; const component = currentComponent();
+  if (!result || !component) return [];
+  return state.activeCadRole === 'generated'
+    ? (result.byGeneratedComponentId.get(String(component.id)) || [])
+    : (result.byOriginalComponentId.get(String(component.id)) || []);
+}
+function drawCadComparisonOverlay(width, height) {
+  if (!state.cadCompare.overlayEnabled || !state.cadCompare.result) return;
+  const rows = comparisonRowsForCurrentComponent(); if (!rows.length) return;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const row of rows) {
+    const ox = Number(row.originalX), oy = Number(row.originalY), gx = Number(row.generatedX), gy = Number(row.generatedY);
+    const hasOriginal = Number.isFinite(ox) && Number.isFinite(oy); const hasGenerated = Number.isFinite(gx) && Number.isFinite(gy);
+    const originalPoint = hasOriginal ? worldToScreen(ox, oy) : null; const generatedPoint = hasGenerated ? worldToScreen(gx, gy) : null;
+    const selected = state.cadCompare.selectedRow === row;
+    if (originalPoint && generatedPoint && row.distance != null && Number(row.distance) > 0.001) {
+      ctx.beginPath(); ctx.moveTo(originalPoint.x, originalPoint.y); ctx.lineTo(generatedPoint.x, generatedPoint.y);
+      ctx.strokeStyle = selected ? 'rgba(255,255,255,.95)' : 'rgba(255,209,102,.62)'; ctx.lineWidth = selected ? 2 : 1; ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
+    }
+    if (state.activeCadRole !== 'original' && originalPoint && originalPoint.x > -20 && originalPoint.x < width + 20 && originalPoint.y > -20 && originalPoint.y < height + 20) {
+      ctx.beginPath(); ctx.arc(originalPoint.x, originalPoint.y, selected ? 7 : 4.5, 0, Math.PI * 2); ctx.strokeStyle = '#56d6c5'; ctx.lineWidth = selected ? 2.5 : 1.3; ctx.stroke();
+    }
+    if (state.activeCadRole !== 'generated' && generatedPoint && generatedPoint.x > -20 && generatedPoint.x < width + 20 && generatedPoint.y > -20 && generatedPoint.y < height + 20) {
+      ctx.beginPath(); ctx.arc(generatedPoint.x, generatedPoint.y, selected ? 7 : 4.5, 0, Math.PI * 2); ctx.strokeStyle = '#ff75dc'; ctx.lineWidth = selected ? 2.5 : 1.3; ctx.stroke();
+    }
+    if (selected) {
+      const labelPoint = state.activeCadRole === 'generated' ? originalPoint : generatedPoint;
+      if (labelPoint) { ctx.fillStyle = '#fff'; ctx.font = 'bold 10px ui-monospace, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillText(`${row.originalName || '—'} → ${row.generatedName || '—'}`, labelPoint.x + 9, labelPoint.y - 7); }
+    }
+  }
+  ctx.restore();
+}
 function draw() {
   const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1)); const width = els.canvas.clientWidth || 1; const height = els.canvas.clientHeight || 1; const targetW = Math.round(width * dpr); const targetH = Math.round(height * dpr);
   if (els.canvas.width !== targetW || els.canvas.height !== targetH) { els.canvas.width = targetW; els.canvas.height = targetH; }
@@ -1116,6 +1390,7 @@ function draw() {
     if (state.selected && Number(state.selected.globalId) === Number(land.globalId)) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(5, radius + 4), 0, Math.PI * 2); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke(); }
     if ((showLabels && radius > 3) || (duplicateEnabled && isSelectedDuplicate)) { ctx.fillStyle = isSelectedDuplicate ? '#ffe39a' : '#d9e5f5'; ctx.fillText(land.cadName, p.x, p.y - Math.max(radius, 4) - (isSelectedDuplicate ? 5 : 2)); }
   }
+  drawCadComparisonOverlay(width, height);
 }
 function findNearestLand(screenX, screenY) {
   const component = currentComponent(); if (!component) return null; const world = screenToWorld(screenX, screenY); const threshold = Math.max(0.35, 12 / state.view.scale); let best = null; let bestD2 = threshold * threshold;
@@ -1290,7 +1565,7 @@ function exportCsv() {
   const headers = ['xray_local_land','xml_global_land_id','cad_name','alias','component','package','center_x_mm','center_y_mm','left_mm','top_mm','width_mm','length_mm','measurement','confidence','verified','manual','anchor_locked','mapping_method','duplicate_cad_name_count','source_row'];
   const lines = [headers.join(',')];
   for (const m of mappings) lines.push([m.localIndex, m.globalId, m.cadName, m.alias || '', m.componentName, m.packageName, m.centerX, m.centerY, m.left, m.top, m.width, m.length, m.measurement, m.confidence, isVerifiedMapping(m), m.manual, m.anchorLocked, m.mappingMethod, m.duplicateCadNameCount, m.sourceRow].map(escapeCsv).join(','));
-  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.7.0.csv`);
+  downloadBlob(new Blob(['\ufeff', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${state.xmlData?.board?.Name || 'bga'}_land_mapping_v0.8.0.csv`);
 }
 function exportJson() {
   const overrides = (state.mappingData?.mappings || [])
@@ -1300,8 +1575,8 @@ function exportJson() {
     const [componentId, globalId] = key.split('\u0000');
     return { componentId, globalId: Number(globalId), cadName };
   });
-  const payload = { app: 'BGA Land Mapper', version: '0.7.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries, safeMapping: true, cadNameRules: { maxLength: state.cadInspector.maxLength, prefix: state.cadInspector.prefix }, cadNameOverrides, overrides };
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.7.0.json');
+  const payload = { app: 'BGA Land Mapper', version: '0.8.0', exportedAt: new Date().toISOString(), files: state.fileNames, board: state.xmlData?.board, schema: state.schema ? { componentCol: state.schema.componentCol, packageCol: state.schema.packageCol, landCol: state.schema.landCol, measurementCol: state.schema.measurementCol } : null, componentSummaries: state.mappingData?.componentSummaries, safeMapping: true, cadNameRules: { maxLength: state.cadInspector.maxLength, prefix: state.cadInspector.prefix }, cadNameOverrides, overrides };
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'bga-land-mapper-project-v0.8.0.json');
 }
 function trustedBackupItem(item) {
   const method = String(item?.mappingMethod || '');
@@ -1372,14 +1647,31 @@ async function restoreBackup(file) {
 }
 function resizeCanvas() { draw(); renderHistogram(); if (!els.histogramOverlay.classList.contains('hidden')) renderDetailedHistogram(); }
 
-els.projectFile.addEventListener('change', (event) => processFile(event.target.files[0]));
+els.projectFile.addEventListener('change', (event) => processFile(event.target.files[0], 'auto'));
+els.originalCadButton.addEventListener('click', () => els.originalCadFile.click());
+els.originalCadFile.addEventListener('change', (event) => processFile(event.target.files[0], 'original'));
+els.generatedCadButton.addEventListener('click', () => els.generatedCadFile.click());
+els.generatedCadFile.addEventListener('change', (event) => processFile(event.target.files[0], 'generated'));
 els.dropZone.addEventListener('dragover', (event) => { event.preventDefault(); els.dropZone.classList.add('drag'); });
 els.dropZone.addEventListener('dragleave', () => els.dropZone.classList.remove('drag'));
-els.dropZone.addEventListener('drop', (event) => { event.preventDefault(); els.dropZone.classList.remove('drag'); processFile(event.dataTransfer.files[0]); });
+els.dropZone.addEventListener('drop', (event) => { event.preventDefault(); els.dropZone.classList.remove('drag'); processFile(event.dataTransfer.files[0], 'auto'); });
 els.restoreButton.addEventListener('click', () => els.restoreFile.click());
 els.restoreFile.addEventListener('change', (event) => restoreBackup(event.target.files[0]));
 els.resetButton.addEventListener('click', resetProject); els.remapButton.addEventListener('click', runMapping);
 els.cadInspectorButton.addEventListener('click', openCadInspector);
+els.cadCompareButton.addEventListener('click', openCadCompare);
+els.closeCadCompareButton.addEventListener('click', closeCadCompare);
+els.cadCompareOverlay.addEventListener('click', (event) => { if (event.target === els.cadCompareOverlay) closeCadCompare(); });
+els.rebuildCadCompareButton.addEventListener('click', () => { state.cadCompare.page = 1; rebuildCadComparison({ showToast: true }); });
+els.cadCompareTolerance.addEventListener('change', () => { state.cadCompare.page = 1; rebuildCadComparison(); });
+els.cadCompareFilter.addEventListener('change', () => { state.cadCompare.filter = els.cadCompareFilter.value; state.cadCompare.page = 1; renderCadCompare(); });
+els.cadCompareSearch.addEventListener('input', () => { state.cadCompare.search = els.cadCompareSearch.value; state.cadCompare.page = 1; renderCadCompare(); });
+els.useOriginalCadButton.addEventListener('click', () => { activateCad('original'); closeCadCompare(); });
+els.useGeneratedCadButton.addEventListener('click', () => { activateCad('generated'); closeCadCompare(); });
+els.fitCadCompareButton.addEventListener('click', () => { fitCadCompareRow(); closeCadCompare(); });
+els.exportCadCompareButton.addEventListener('click', exportCadComparison);
+els.cadComparePrevPage.addEventListener('click', () => { state.cadCompare.page -= 1; renderCadCompare(); });
+els.cadCompareNextPage.addEventListener('click', () => { state.cadCompare.page += 1; renderCadCompare(); });
 els.closeCadInspectorButton.addEventListener('click', closeCadInspector);
 els.cadInspectorOverlay.addEventListener('click', (event) => { if (event.target === els.cadInspectorOverlay) closeCadInspector(); });
 els.cadInspectorScope.addEventListener('change', () => { state.cadInspector.page = 1; refreshCadInspector(); });
@@ -1395,7 +1687,9 @@ els.cadApplyNamesButton.addEventListener('click', () => applyCadNamesToProject()
 els.cadExportXmlButton.addEventListener('click', exportCorrectedCadXml);
 els.cadInspectorPrevPage.addEventListener('click', () => { state.cadInspector.page -= 1; renderCadInspectorTable(); });
 els.cadInspectorNextPage.addEventListener('click', () => { state.cadInspector.page += 1; renderCadInspectorTable(); });
+els.activeCadSelect.addEventListener('change', () => { if (els.activeCadSelect.value) activateCad(els.activeCadSelect.value); });
 els.componentSelect.addEventListener('change', () => { state.selectedComponentId = els.componentSelect.value; state.selected = null; state.preview = null; state.page = 1; state.duplicateView.selectedName = ''; resetHistogramState(); clearDetails(); refreshDuplicateControls(); updateStats(); renderTable(); renderTeachPanel(); fitView(); renderHistogram(); renderDetailedHistogram(); });
+els.cadCompareOverlayToggle.addEventListener('change', () => { state.cadCompare.overlayEnabled = els.cadCompareOverlayToggle.checked; draw(); });
 els.histogramBins.addEventListener('change', renderHistogram);
 els.expandHistogramButton.addEventListener('click', openDetailedHistogram);
 els.measurementHistogram.addEventListener('click', openDetailedHistogram);

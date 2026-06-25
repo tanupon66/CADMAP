@@ -1,0 +1,24 @@
+import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { ZipArchive } from '../zip-reader.js';
+import { parseInspectionXml } from '../parsers.js';
+import { generateCadRenames, rewriteCadXml } from '../cad-inspector.js';
+import { buildCadComparison } from '../cad-compare.js';
+
+const source = process.argv[2];
+if (!source) throw new Error('Usage: node tests/test-cad-compare-real.mjs /path/to/project.zip');
+const outer = new ZipArchive(await fs.readFile(source));
+const xmlEntry = outer.find((entry) => /\.xml$/i.test(entry.name));
+assert(xmlEntry, 'ZIP must contain XML');
+const originalText = await outer.read(xmlEntry.name, 'text');
+const original = parseInspectionXml(originalText);
+const generatedNames = generateCadRenames(original, new Map(), { maxLength: 5, prefix: 'L' });
+const generatedText = rewriteCadXml(originalText, generatedNames.renames);
+const generated = parseInspectionXml(generatedText);
+const comparison = buildCadComparison(original, generated, { coordinateTolerance: 0.08 });
+assert.equal(comparison.summary.matchedComponents, original.components.length);
+assert.equal(comparison.summary.matchedLands, original.totalLands);
+assert.equal(comparison.summary.missingGenerated, 0);
+assert.equal(comparison.summary.extraGenerated, 0);
+assert.equal(comparison.summary.renamed + comparison.summary.renamedMoved, generatedNames.renames.size);
+console.log(JSON.stringify({ generatedRenames: generatedNames.renames.size, summary: comparison.summary }, null, 2));
